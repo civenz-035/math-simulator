@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>🎲 Dice Lab — ห้องทดลองความน่าจะเป็น</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0d14;--surface:#111622;--card:#161d2e;--card2:#1a2236;
+  --border:rgba(99,120,200,.18);--accent:#6B8CFF;--accent2:#a78bfa;
+  --green:#34d399;--red:#f87171;--orange:#fb923c;--yellow:#fbbf24;--cyan:#22d3ee;
+  --text:#e2e8f0;--muted:#7d8aa5;--radius:12px;
+  --mono:ui-monospace,'JetBrains Mono','Cascadia Code',Consolas,monospace;
+}
+html,body{height:100%;overflow:hidden}
+body{font-family:system-ui,'Segoe UI',Tahoma,sans-serif;background:var(--bg);color:var(--text);font-size:14px}
+body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:radial-gradient(ellipse 60% 50% at 20% 0%,rgba(107,140,255,.12) 0%,transparent 70%),
+  radial-gradient(ellipse 50% 40% at 80% 100%,rgba(167,139,250,.10) 0%,transparent 70%)}
+.app{position:relative;z-index:1;height:100dvh;display:flex;flex-direction:column;max-width:1440px;margin:0 auto;padding:0 16px}
+/* ── header ── */
+header{display:flex;align-items:center;gap:14px;padding:12px 0;flex-shrink:0}
+.logo{width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,#6B8CFF,#a78bfa);
+  display:grid;place-items:center;font-size:22px;box-shadow:0 0 24px rgba(107,140,255,.45);flex-shrink:0}
+.htitle h1{font-size:1.15rem;font-weight:800;letter-spacing:-.3px}
+.htitle h1 span{background:linear-gradient(90deg,#6B8CFF,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.htitle p{font-size:.72rem;color:var(--muted);font-family:var(--mono)}
+.hspace{flex:1}
+.srv{display:flex;align-items:center;gap:8px;font-size:.75rem;font-family:var(--mono);color:var(--muted);
+  background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:7px 14px;white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--red)}
+.dot.on{background:var(--green);animation:blink 2s infinite}
+@keyframes blink{50%{opacity:.35}}
+.btn{border-radius:999px;font-weight:700;cursor:pointer;transition:.2s;border:1.5px solid var(--border);
+  background:transparent;color:var(--muted);padding:8px 18px;font-size:.8rem;white-space:nowrap}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn.primary{background:linear-gradient(135deg,#6B8CFF,#a78bfa);border:none;color:#fff;box-shadow:0 4px 18px rgba(107,140,255,.35)}
+.btn.primary:hover{transform:translateY(-1px)}
+.btn.run{background:linear-gradient(135deg,#059669,#34d399);border:none;color:#04120c;font-size:.9rem;padding:10px 26px}
+.btn.run:disabled{opacity:.55;cursor:wait;transform:none}
+.btn.danger:hover{border-color:var(--red);color:var(--red)}
+/* ── tabs ── */
+nav.tabs{display:flex;gap:6px;flex-shrink:0;background:var(--surface);border:1px solid var(--border);
+  border-radius:14px;padding:6px;margin-bottom:12px}
+.tab{flex:1;border:none;background:transparent;color:var(--muted);font-weight:700;font-size:.85rem;
+  padding:10px 8px;border-radius:10px;cursor:pointer;transition:.2s;white-space:nowrap}
+.tab:hover{color:var(--text);background:rgba(107,140,255,.07)}
+.tab.active{background:rgba(107,140,255,.15);color:var(--accent)}
+/* ── panels ── */
+main{flex:1;min-height:0;position:relative}
+.panel{display:none;height:100%;min-height:0}
+.panel.active{display:flex;gap:12px}
+.col{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px 16px;
+  overflow-y:auto;min-height:0;scrollbar-width:thin}
+.col h3{font-size:.8rem;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:10px}
+.col h3:not(:first-child){margin-top:16px}
+/* setup columns */
+#panel-setup.active{display:grid;grid-template-columns:300px 1fr 1fr}
+.modecard{border:1.5px solid var(--border);border-radius:10px;padding:9px 12px;margin-bottom:8px;cursor:pointer;transition:.2s}
+.modecard:hover{border-color:var(--accent)}
+.modecard.sel{border-color:var(--accent);background:rgba(107,140,255,.1)}
+.modecard b{font-size:.82rem}.modecard p{font-size:.7rem;color:var(--muted);margin-top:2px}
+/* fields */
+.f{display:flex;flex-direction:column;gap:4px;margin-bottom:9px;min-width:0}
+.f label{font-size:.64rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;font-family:var(--mono);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.f input,.f select{background:var(--surface);border:1.5px solid var(--border);border-radius:8px;color:var(--text);
+  font-family:var(--mono);font-size:.82rem;padding:7px 10px;width:100%;outline:none;transition:.2s}
+.f input:focus,.f select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(107,140,255,.15)}
+.f select option{background:var(--card)}
+.frow{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.frow.tri{grid-template-columns:1fr 1fr 1fr}
+.slide{display:flex;align-items:center;gap:8px}
+.slide input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:4px;border-radius:99px;background:linear-gradient(90deg,var(--accent) var(--pct,50%),#2a3350 var(--pct,50%));outline:none;cursor:pointer;padding:0;border:none}
+.slide input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;background:var(--accent);border:2px solid var(--bg);cursor:pointer}
+.slide input[type=number]{width:82px;flex-shrink:0}
+.tgl{display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--surface);
+  border:1.5px solid var(--border);border-radius:8px;padding:7px 10px;margin-bottom:9px;font-size:.78rem}
+.tgl input{width:18px;height:18px;accent-color:var(--accent);cursor:pointer}
+details.adv{border:1px solid var(--border);border-radius:10px;margin-bottom:9px;background:var(--surface)}
+details.adv summary{cursor:pointer;padding:9px 12px;font-size:.76rem;font-weight:700;color:var(--muted);list-style:none;display:flex;justify-content:space-between}
+details.adv summary::-webkit-details-marker{display:none}
+details.adv summary:hover{color:var(--accent)}
+details.adv .advbody{padding:2px 12px 12px}
+.seclabel{font-size:.66rem;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--muted);
+  display:flex;align-items:center;gap:8px;margin:12px 0 8px}
+.seclabel::after{content:'';flex:1;height:1px;background:var(--border)}
+.hint{font-size:.72rem;color:var(--muted);line-height:1.55;background:var(--surface);border:1px solid var(--border);
+  border-radius:10px;padding:9px 12px;margin-bottom:10px}
+.hint b{color:var(--cyan)}
+/* lab */
+#panel-lab.active{display:grid;grid-template-columns:300px 1fr}
+#labResult{display:flex;flex-direction:column;gap:10px;overflow:hidden;background:transparent;border:none;padding:0}
+.kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;flex-shrink:0}
+.kpi{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px}
+.kpi .l{font-size:.62rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px}
+.kpi .v{font-size:1.02rem;font-weight:800;font-family:var(--mono);margin-top:3px}
+.v.green{color:var(--green)}.v.red{color:var(--red)}.v.blue{color:var(--accent)}.v.orange{color:var(--orange)}.v.purple{color:var(--accent2)}.v.yellow{color:var(--yellow)}
+.chartwrap{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px;flex:1;min-height:0;display:flex;flex-direction:column}
+.charthead{display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-shrink:0}
+.charthead select{background:var(--surface);border:1.5px solid var(--border);border-radius:8px;color:var(--text);
+  font-size:.75rem;padding:5px 9px;outline:none}
+#equity{flex:1;min-height:0;width:100%}
+.labbottom{display:grid;grid-template-columns:1.4fr 1fr;gap:10px;flex-shrink:0;height:31%}
+.minicol{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px;overflow-y:auto;min-height:0;scrollbar-width:thin}
+.minicol h4{font-size:.7rem;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:8px;position:sticky;top:0}
+table.rt{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:.7rem}
+table.rt th{position:sticky;top:18px;background:var(--card);color:var(--muted);text-align:right;padding:4px 6px;font-weight:700}
+table.rt th:first-child,table.rt td:first-child{text-align:left}
+table.rt td{text-align:right;padding:3px 6px;border-top:1px solid rgba(99,120,200,.1)}
+.win{color:var(--green)}.loss{color:var(--red)}
+.ev{font-size:.72rem;font-family:var(--mono);padding:5px 8px;border-left:3px solid var(--accent);margin-bottom:6px;background:var(--surface);border-radius:0 8px 8px 0}
+.ev.warn{border-color:var(--yellow)}.ev.bad{border-color:var(--red)}.ev.good{border-color:var(--green)}
+.stopbadge{display:inline-block;font-size:.72rem;font-weight:700;font-family:var(--mono);padding:4px 12px;border-radius:999px;
+  background:rgba(251,191,36,.12);color:var(--yellow);border:1px solid rgba(251,191,36,.35)}
+.empty{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--muted);text-align:center;padding:20px}
+/* calc */
+#panel-calc.active{display:grid;grid-template-columns:320px 1fr}
+.prog{font-family:var(--mono);font-size:.72rem}
+.prog div{display:flex;justify-content:space-between;padding:3px 6px;border-top:1px solid rgba(99,120,200,.1)}
+/* theory */
+#panel-theory.active{display:grid;grid-template-columns:1fr 1fr 1fr}
+.tcard{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px 16px;overflow-y:auto;min-height:0;scrollbar-width:thin}
+.tcard h3{font-size:.85rem;margin-bottom:8px}
+.tcard p,.tcard li{font-size:.76rem;color:#c3cbdd;line-height:1.65}
+.tcard ul{padding-left:18px}
+.formula{font-family:var(--mono);font-size:.74rem;background:#0d1322;border:1px solid var(--border);
+  border-radius:8px;padding:8px 10px;margin:8px 0;color:var(--cyan);overflow-x:auto;white-space:nowrap;scrollbar-width:thin}
+/* toast */
+#toast{position:fixed;bottom:24px;right:24px;z-index:100;padding:13px 22px;border-radius:12px;font-size:.83rem;font-weight:600;
+  opacity:0;transform:translateY(12px);transition:.3s;pointer-events:none;max-width:380px}
+#toast.show{opacity:1;transform:translateY(0)}
+#toast.ok{background:#064e3b;border:1px solid var(--green);color:var(--green)}
+#toast.err{background:#450a0a;border:1px solid var(--red);color:var(--red)}
+#toast.info{background:#1e1b4b;border:1px solid var(--accent);color:var(--accent)}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid rgba(0,0,0,.3);border-top-color:#04120c;border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media(max-width:1100px){
+  #panel-setup.active{grid-template-columns:1fr 1fr}
+  #setupAdv{display:none}
+  #panel-theory.active{grid-template-columns:1fr 1fr}
+  .kpis{grid-template-columns:repeat(3,1fr)}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo">🎲</div>
+    <div class="htitle"><h1>Dice <span>Lab</span></h1><p>ห้องทดลองความน่าจะเป็น · Monte-Carlo</p></div>
+    <div class="hspace"></div>
+    <div class="srv"><span class="dot" id="dot"></span><span id="srvTxt">connecting…</span></div>
+    <button class="btn" id="btnReload">↺ โหลดใหม่</button>
+    <button class="btn primary" id="btnSave">💾 บันทึก config</button>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="setup">🎛️ ตั้งค่า</button>
+    <button class="tab" data-tab="lab">🧪 ห้องทดลอง · รัน &amp; ดูผล</button>
+    <button class="tab" data-tab="calc">🛡️ เครื่องคำนวณ Survivor</button>
+    <button class="tab" data-tab="theory">📐 ทฤษฎี &amp; สูตร</button>
+  </nav>
+
+  <main>
+    <!-- ═══ TAB 1: SETUP ═══ -->
+    <section class="panel active" id="panel-setup">
+      <div class="col" id="setupModes">
+        <h3>🎯 โหมดจำลอง</h3>
+        <div id="modeCards"></div>
+        <div class="hint" id="modeDesc"></div>
+        <h3>🌍 ค่าเริ่มต้นกลาง (Global)</h3>
+        <div id="fGlobal"></div>
+      </div>
+      <div class="col" id="setupMid">
+        <h3>📦 พารามิเตอร์ตามโหมด</h3>
+        <div class="f"><label>โฟกัสโหมดที่แสดง</label>
+          <select id="focusMode">
+            <option value="all">แสดงทั้งหมด</option>
+            <option value="1">Mode 1 — Escalation</option>
+            <option value="2">Mode 2 — High-Frequency</option>
+            <option value="3">Mode 3 — Dual-Strategy</option>
+            <option value="5">Mode 5 — Survivor</option>
+            <option value="4">Mode 4 — Configurable</option>
+          </select>
+        </div>
+        <div id="fModes"></div>
+      </div>
+      <div class="col" id="setupAdv">
+        <h3>🛠️ Mode 4 — ขั้นสูง</h3>
+        <div class="hint">ค่า <b>0 = ปิด</b> ทุก trigger ถ้าไม่เข้าใจให้คง 0 ไว้ ระบบจะใช้พฤติกรรมพื้นฐาน (ทบเมื่อแพ้ · รีเซ็ตเมื่อชนะ)</div>
+        <div id="fAdv"></div>
+      </div>
+    </section>
+
+    <!-- ═══ TAB 2: LAB ═══ -->
+    <section class="panel" id="panel-lab">
+      <div class="col" id="labCtl">
+        <h3>▶ ควบคุมการรัน</h3>
+        <div class="f"><label>โหมด</label><select id="labMode">
+          <option value="1">1 — Escalation (ทบเมื่อแพ้)</option>
+          <option value="2">2 — High-Frequency (เบทคงที่ 98%)</option>
+          <option value="3">3 — Dual-Strategy (สลับอัตโนมัติ)</option>
+          <option value="4">4 — Configurable</option>
+          <option value="5">5 — Survivor</option>
+        </select></div>
+        <div class="f"><label>จำนวนรอบ (rounds)</label>
+          <div class="slide"><input type="range" id="labRoundsR" min="10" max="50000" step="10" value="1000">
+          <input type="number" id="labRounds" value="1000" min="1" max="200000"></div></div>
+        <div class="frow">
+          <div class="f"><label>ทุนตั้งต้น (ว่าง=ตาม config)</label><input type="number" id="labBalance" placeholder="config" step="any"></div>
+          <div class="f"><label>Seed (ว่าง=สุ่ม)</label><input type="number" id="labSeed" placeholder="สุ่ม"></div>
+        </div>
+        <div class="frow">
+          <div class="f"><label>Base bet (ว่าง=ตาม config)</label><input type="number" id="labBaseBet" placeholder="config" step="any"></div>
+          <div class="f"><label>Win chance % (ว่าง=ตาม config)</label><input type="number" id="labChance" placeholder="config" step="any"></div>
+        </div>
+        <div class="frow">
+          <div class="f"><label>ฝั่งแทง</label><select id="labStrategy"><option value="">ตาม config</option><option value="high">high</option><option value="low">low</option></select></div>
+          <div class="f"><label>หยุดเมื่อแพ้ติด (ว่าง=ตาม config)</label><input type="number" id="labMaxLoss" placeholder="config" min="0"></div>
+        </div>
+        <details class="adv"><summary>▼ ตัวเลือกเพิ่มเติม <span>▾</span></summary><div class="advbody">
+          <div class="frow">
+            <div class="f"><label>เป้ากำไร (stop-win)</label><input type="number" id="labStopWin" placeholder="ไม่หยุด" step="any"></div>
+            <div class="f"><label>เป้า wagered (โหมด 2/3)</label><input type="number" id="labStopWagered" placeholder="config" step="any"></div>
+          </div>
+          <div class="frow">
+            <div class="f"><label>หยุดเมื่อชนะครบ N ครั้ง</label><input type="number" id="labOnWin" placeholder="0=ไม่จำกัด" min="0"></div>
+            <div class="f"><label>Wager win chance %</label><input type="number" id="labWagerChance" placeholder="config" step="any"></div>
+          </div>
+          <div class="tgl"><span>🎯 ติดตาม Rare (990×–9900×)</span><input type="checkbox" id="labRare"></div>
+          <div class="tgl"><span>💾 ใช้ค่าจากแท็บตั้งค่า</span><input type="checkbox" id="labUseCfg" checked></div>
+        </div></details>
+        <button class="btn run" id="btnRun" style="width:100%">▶ รันจำลอง</button>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn" id="btnSeed" style="flex:1" title="สุ่ม seed ใหม่">🎲 seed</button>
+          <button class="btn" id="btnCsv" style="flex:1">📥 CSV</button>
+        </div>
+        <div class="hint" style="margin-top:10px">ตั้ง <b>Seed</b> เพื่อทดลองซ้ำได้ผลเดิม — หัวใจของการทดลองเชิงวิทยาศาสตร์ รันเสร็จดูกราฟและตารางได้ทันที ไม่ต้องเปิด terminal</div>
+      </div>
+      <div id="labResult">
+        <div class="kpis">
+          <div class="kpi"><div class="l">Net PnL</div><div class="v" id="kPnl">—</div></div>
+          <div class="kpi"><div class="l">Balance สุดท้าย</div><div class="v blue" id="kBal">—</div></div>
+          <div class="kpi"><div class="l">Win rate</div><div class="v purple" id="kWin">—</div></div>
+          <div class="kpi"><div class="l">แพ้ติดสูงสุด</div><div class="v orange" id="kStreak">—</div></div>
+          <div class="kpi"><div class="l">รอบที่รัน</div><div class="v" id="kRounds">—</div></div>
+          <div class="kpi"><div class="l">Wagered</div><div class="v yellow" id="kWager">—</div></div>
+        </div>
+        <div class="chartwrap">
+          <div class="charthead">
+            <b style="font-size:.8rem">📈 เส้นทุน (equity curve)</b>
+            <select id="chartSel"><option value="balance">Balance</option><option value="netPnl">Net PnL สะสม</option><option value="bet">ขนาดเบทต่อรอบ</option></select>
+            <span class="stopbadge" id="stopBadge" style="display:none"></span>
+            <span style="flex:1"></span><span style="font-size:.7rem;color:var(--muted);font-family:var(--mono)" id="chartInfo"></span>
+          </div>
+          <canvas id="equity"></canvas>
+        </div>
+        <div class="labbottom">
+          <div class="minicol"><h4>🧾 รอบล่าสุด (<span id="recentN">0</span>)</h4><div id="recentTbl"><div class="empty">กด “▶ รันจำลอง” เพื่อเริ่มการทดลอง</div></div></div>
+          <div class="minicol"><h4>🏆 ชนะสูงสุด · เหตุการณ์</h4><div id="eventFeed"><div class="empty">ผลลัพธ์และเหตุการณ์สำคัญจะปรากฏที่นี่</div></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ TAB 3: CALC ═══ -->
+    <section class="panel" id="panel-calc">
+      <div class="col">
+        <h3>🛡️ เครื่องคำนวณ Survivor</h3>
+        <div class="hint">เบทตั้งต้นที่ทำให้พอร์ต <b>หมดพอดี</b> เมื่อแพ้ติดกัน N ไม้:<br><b>s₀ = B·(m−1) / (m<sup>N</sup> − 1)</b></div>
+        <div class="f"><label>Balance (B)</label><input type="number" id="cBal" value="10" step="any"></div>
+        <div class="f"><label>ตัวคูณทบเมื่อแพ้ (m)</label>
+          <div class="slide"><input type="range" id="cMulR" min="1.01" max="3" step="0.01" value="1.06"><input type="number" id="cMul" value="1.06" step="0.01"></div></div>
+        <div class="f"><label>Win chance %</label>
+          <div class="slide"><input type="range" id="cChanceR" min="0.1" max="99" step="0.01" value="3.96"><input type="number" id="cChance" value="3.96" step="any"></div></div>
+        <div class="f"><label>โหมด N</label><select id="cMode"><option value="auto">Auto — คำนวณ N จากความเสี่ยง</option><option value="manual">Manual — ระบุ N เอง</option></select></div>
+        <div class="f" id="cNWarp" style="display:none"><label>แพ้ติดกันที่ต้องรอด (N)</label><input type="number" id="cN" value="50" min="1"></div>
+        <div class="f" id="cRiskWarp"><label>ความเสี่ยงที่ยอมรับได้</label><select id="cRisk">
+          <option value="0.01">1% — 1 ใน 100 เซสชัน</option>
+          <option value="0.001" selected>0.1% — 1 ใน 1,000 เซสชัน</option>
+          <option value="0.0001">0.01% — 1 ใน 10,000 เซสชัน</option>
+        </select></div>
+        <div class="f"><label>ใช้ทุนเป็นหลักประกัน (coverage)</label>
+          <div class="slide"><input type="range" id="cCovR" min="10" max="100" step="5" value="100"><input type="number" id="cCov" value="100" step="any"></div></div>
+        <button class="btn run" id="btnCalc" style="width:100%">🧮 คำนวณ</button>
+        <button class="btn primary" id="btnCalcSave" style="width:100%;margin-top:8px" disabled>💾 บันทึกเข้า config</button>
+      </div>
+      <div class="col" id="calcOut"><div class="empty">ใส่ค่าแล้วกด “🧮 คำนวณ”<br>ระบบจะบอกเบทตั้งต้นที่รอด N ไม้แดงติดพอดี</div></div>
+    </section>
+
+    <!-- ═══ TAB 4: THEORY ═══ -->
+    <section class="panel" id="panel-theory">
+      <div class="tcard"><h3>📉 Expected Value — เจ้ามือกินตรงไหน</h3>
+        <p>ทุนทุกเบทจ่ายตามสูตรนี้:</p>
+        <div class="formula">payout = (1 − HE) / chance</div>
+        <p>เช่น chance 3.96% + HE 1% → จ่าย ~25x ค่าคาดหวังต่อ 1 บาท:</p>
+        <div class="formula">EV = chance × payout − 1 = −HE = −1%</div>
+        <p>ทุกระบบทบเบทแค่ <b>เปลี่ยนรูปทรงการขาดทุน</b> (เสียน้อยบ่อย ๆ ↔ เสียนาน ๆ ครั้งแต่หนัก) ไม่เคยเปลี่ยน EV ให้เป็นบวกได้</p>
+      </div>
+      <div class="tcard"><h3>🛡️ สูตร Survivor — เบทรอด N ไม้แดง</h3>
+        <p>แพ้ติด N ไม้ที่ตัวคูณ m เสียรวม:</p>
+        <div class="formula">exposure = s₀·(m<sup>N</sup> − 1)/(m − 1)</div>
+        <p>ตั้งให้เท่าทุน B แล้วแก้หาเบทตั้งต้น:</p>
+        <div class="formula">s₀ = B·(m − 1)/(m<sup>N</sup> − 1)</div>
+        <p>ตัวอย่าง B=10, m=1.06, N=50 → s₀ ≈ 0.035 ถ้าเบทใหญ่กว่านี้ แดง 50 ไม้ติด = พอร์ตแตก</p>
+      </div>
+      <div class="tcard"><h3>🔬 วิธีทดลองแบบวิทยาศาสตร์</h3>
+        <ul>
+          <li><b>ล็อก seed</b> แล้วเปลี่ยนทีละ 1 ตัวแปร (เช่น HE 1% → 2%) ดูกราฟเทียบกัน</li>
+          <li>รันรอบเยอะ (10,000+) ผลจะเข้าใกล้ EV ทางทฤษฎี — คือกฎจำนวนมาก (Law of Large Numbers)</li>
+          <li>ดู <b>แพ้ติดสูงสุด</b> เทียบกับ N ที่คำนวณไว้: ถ้าเกิน N บ่อยกว่าความน่าจะเป็น แปลว่า stake ใหญ่ไป</li>
+          <li>โหมด 2 แสดงให้เห็นว่า win-rate 98% ก็ยังเสีย (burn) เพราะจ่ายไม่เต็ม — ดูแถว Wagered เทียบ Net PnL</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+</div>
+<div id="toast"></div>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+/* ══ schema: key → [label, kind] — ครบทุก key ใน dice.env ══ */
+const SCHEMA = {
+global: [
+  ['START_BALANCE','ทุนตั้งต้น','num'],['HE','House Edge %','slider:0:5:0.1'],
+  ['GLOBAL_BASE_BET','Base bet กลาง','num'],['GLOBAL_WIN_CHANCE','Win chance กลาง %','slider:0.1:98:0.01'],
+  ['GLOBAL_BET_TARGET','ฝั่งแทงกลาง','hl'],['GLOBAL_MAX_ROUNDS','รอบสูงสุด','num'],
+  ['GLOBAL_ROUND_DELAY','หน่วงวินาที/รอบ (terminal)','num'],
+  ['GLOBAL_STOP_PROFIT','หยุดเมื่อกำไรถึง','num'],['GLOBAL_STOP_LOSS','หยุดเมื่อขาดทุนถึง','num'],
+  ['GLOBAL_STOP_ON_WIN','หยุดเมื่อชนะครบ N','num'],['GLOBAL_MAX_LOSS_STREAK','หยุดเมื่อแดงติด N','num'],
+  ['HUNT_RARE','ล่า Rare 990×–9900×','bool'],
+],
+m1: [['PROFIT_BASE_BET','Base bet','num'],['PROFIT_WIN_CHANCE','Win chance %','slider:0.1:98:0.01'],
+  ['PROFIT_BET_TARGET','ฝั่งแทง','hl'],['PROFIT_STOP_TARGET','เป้ากำไร','num'],
+  ['PROFIT_MAX_LOSS_STREAK','แดงติดสูงสุด','num'],['PROFIT_STOP_ON_WIN','หยุดเมื่อชนะครบ','num']],
+m2: [['WAGER_BASE_BET','Base bet (ว่าง=คำนวณจาก %)','num'],['WAGER_BET_PCT','% ของทุนต่อไม้','slider:0.1:10:0.1'],
+  ['WAGER_WIN_CHANCE','Win chance %','slider:50:99:0.01'],['WAGER_BET_TARGET','ฝั่งแทง','hl'],
+  ['WAGER_TARGET','เป้า wagered','num'],['WAGER_STOP_ON_WIN','หยุดเมื่อชนะครบ','num']],
+m3: [['HYBRID_LOSS_TRIGGER','สลับกู้ทุนเมื่อทุนลด %','slider:0.5:20:0.1'],['HYBRID_PROFIT_TRIGGER','กลับฐานเมื่อกำไร %','slider:0.5:20:0.5']],
+m5: [['BRAVE_LOSSES_ALLOWED','ทนแดงติดได้ (N)','num'],['BRAVE_LOSS_MUL','ตัวคูณทบ','slider:1.01:3:0.01'],
+  ['BRAVE_WIN_CHANCE','Win chance %','slider:0.1:99:0.01'],['BRAVE_BET_TARGET','ฝั่งแทง','hl'],
+  ['BRAVE_STOP_PROFIT','เป้ากำไรแล้วหยุด','num'],['BRAVE_WIN_RESET_BASE','ชนะแล้วรีเซ็ต','yn']],
+m4base: [['CUSTOM_BASE_BET','Base bet','num'],['CUSTOM_WIN_CHANCE','Win chance %','slider:0.1:98:0.01'],['CUSTOM_BET_TARGET','ฝั่งแทง','hl']],
+m4loss: [['CUSTOM_LOSS_MUL','ตัวคูณเมื่อแพ้','slider:1:3:0.01'],['CUSTOM_LOSS_MUL_EVERY','ทบทุก N ไม้แพ้','num'],['CUSTOM_LOSS_RESET_FIRST','แพ้ไม้แรก=รีเซ็ต','yn']],
+m4chg: [['CUSTOM_LOSS_CHANGE_BET_STREAK','เปลี่ยนเบทเมื่อแดงติด','num'],['CUSTOM_LOSS_CHANGE_BET_VALUE','เบทใหม่','num'],
+  ['CUSTOM_LOSS_CHANGE_CHANCE_STREAK','เปลี่ยน chance เมื่อแดงติด','num'],['CUSTOM_LOSS_CHANGE_CHANCE_VALUE','chance ใหม่ %','num']],
+m4win: [['CUSTOM_WIN_MUL','ตัวคูณเมื่อชนะ','slider:0:2:0.01'],['CUSTOM_WIN_RESET_BASE','ชนะแล้วรีเซ็ต','num']],
+m4reset: [['CUSTOM_RESET_AFTER_BETS','รีเซ็ตทุก N ไม้','num'],['CUSTOM_RESET_ON_LOSS_STREAK','รีเซ็ตเมื่อแดงติด','num'],
+  ['CUSTOM_RESET_ON_LOSS_TOTAL_EVERY','รีเซ็ตทุก N แพ้รวม','num'],['CUSTOM_RESET_ON_LOSS_VALUE_ROW','รีเซ็ตเมื่อเสียติดเป็นเงิน','num'],
+  ['CUSTOM_RESET_ON_LOSS_VALUE_TOTAL_EVERY','รีเซ็ตทุก N บาทที่เสียรวม','num'],['CUSTOM_RESET_ON_LOSS_SINCE_MAX_PROFIT','รีเซ็ตเมื่อร่วงจากจุดสูงสุด','num'],
+  ['CUSTOM_RESET_ON_WIN_STREAK','รีเซ็ตเมื่อเขียวติด','num'],['CUSTOM_RESET_ON_WIN_TOTAL_EVERY','รีเซ็ตทุก N ชนะรวม','num'],
+  ['CUSTOM_RESET_ON_WIN_VALUE_ROW','รีเซ็ตเมื่อได้ติดเป็นเงิน','num'],['CUSTOM_RESET_ON_WIN_VALUE_TOTAL_EVERY','รีเซ็ตทุก N บาทที่ได้รวม','num'],
+  ['CUSTOM_RESET_ON_WIN_SINCE_MIN_PROFIT','รีเซ็ตเมื่อฟื้นจากจุดต่ำสุด','num']],
+m4stop: [['CUSTOM_STOP_AFTER_BETS','หยุดเมื่อครบ N ไม้','num'],['CUSTOM_STOP_ON_LOSS_STREAK','หยุดเมื่อแดงติด','num'],
+  ['CUSTOM_STOP_ON_LOSS_TOTAL','หยุดเมื่อแพ้รวม N','num'],['CUSTOM_STOP_ON_LOSS_VALUE_ROW','หยุดเมื่อเสียติดเป็นเงิน','num'],
+  ['CUSTOM_STOP_ON_LOSS_VALUE_TOTAL','หยุดเมื่อเสียรวมเป็นเงิน','num'],['CUSTOM_STOP_ON_LOSS_SINCE_MAX_PROFIT','หยุดเมื่อร่วงจากจุดสูงสุด','num'],
+  ['CUSTOM_STOP_ON_WIN_STREAK','หยุดเมื่อเขียวติด','num'],['CUSTOM_STOP_ON_WIN_TOTAL','หยุดเมื่อชนะรวม N','num'],
+  ['CUSTOM_STOP_ON_WIN_VALUE_ROW','หยุดเมื่อได้ติดเป็นเงิน','num'],['CUSTOM_STOP_ON_WIN_VALUE_TOTAL','หยุดเมื่อได้รวมเป็นเงิน','num'],
+  ['CUSTOM_STOP_ON_WIN_SINCE_MIN_PROFIT','หยุดเมื่อฟื้นจากจุดต่ำสุด','num']],
+m4adv: [['CUSTOM_UPPER_LIMIT_BALANCE','เพดานทุน (หยุดเมื่อถึง)','num'],['CUSTOM_LOWER_LIMIT_BALANCE','พื้นทุน (หยุดเมื่อแตะ)','num'],
+  ['CUSTOM_MIN_BET','เบทต่ำสุด','num'],['CUSTOM_MAX_BET','เบทสูงสุด','num'],
+  ['CUSTOM_ZIGZAG_EVERY','สลับฝั่งทุก N ไม้','num'],['CUSTOM_BETS_PER_SEC','ความเร็ว (ไม้/วิ)','num']],
+};
+const ALL_KEYS = Object.values(SCHEMA).flat().map(f => f[0]);
+const MODES = {
+ 1:['📈 Escalation','ทบเบทเมื่อแพ้ติด · พิสูจน์ว่าทบแล้ว EV ไม่เปลี่ยน แค่รอวันแตก'],
+ 2:['🎯 High-Frequency','ชนะ 98% เบทคงที่ · ปั่นรอบเยอะ ๆ แล้วดูทุนค่อย ๆ ละลายจาก HE'],
+ 3:['🔀 Dual-Strategy','ปั่นแบบโหมด 2 พอทุนร่วงถึง trigger สลับไปกู้แบบโหมด 1 แล้วกลับฐาน'],
+ 4:['🛠️ Configurable','คุมเองทุกตัวคูณ / reset / stop / zigzag — ห้องทดลองหลัก'],
+ 5:['🛡️ Survivor','คำนวณเบทจากสูตร closed-form ให้รอด N ไม้แดงติดพอดี แล้ววัดผลจริง'],
+};
+let CFG = {};
+/* ══ build fields ══ */
+function fieldHTML(key, label, kind) {
+  if (kind === 'bool') return `<div class="tgl"><span>${label}<br><small style="font-family:var(--mono);color:var(--muted)">${key}</small></span><input type="checkbox" id="${key}"></div>`;
+  if (kind === 'hl') return `<div class="f"><label>${label} · ${key}</label><select id="${key}"><option value="high">high</option><option value="low">low</option></select></div>`;
+  if (kind === 'yn') return `<div class="f"><label>${label} · ${key}</label><select id="${key}"><option value="1">1 — ใช่</option><option value="0">0 — ไม่</option></select></div>`;
+  if (kind.startsWith('slider:')) {
+    const [, mn, mx, st] = kind.split(':');
+    return `<div class="f"><label>${label} · ${key}</label><div class="slide"><input type="range" id="${key}R" min="${mn}" max="${mx}" step="${st}"><input type="number" id="${key}" step="${st}"></div></div>`;
+  }
+  return `<div class="f"><label>${label} · ${key}</label><input type="number" id="${key}" step="any"></div>`;
+}
+function renderGroups(el, groups) {
+  el.innerHTML = groups.map(([title, keys]) =>
+    `<div class="seclabel">${title}</div>` + SCHEMA[keys].map(([k, l, t]) => fieldHTML(k, l, t)).join('')
+  ).join('');
+  bindSliders(el);
+}
+function bindSliders(root) {
+  root.querySelectorAll('input[type=range]').forEach(r => {
+    const key = r.id.replace(/R$/, '');
+    const num = root.querySelector('#' + CSS.escape(key)) || document.getElementById(key);
+    if (!num) return;
+    const paint = () => { const p = (r.value - r.min) / (r.max - r.min) * 100; r.style.setProperty('--pct', p + '%'); };
+    r.addEventListener('input', () => { num.value = r.value; paint(); });
+    num.addEventListener('input', () => { if (+num.value >= +r.min && +num.value <= +r.max) { r.value = num.value; paint(); } });
+    paint();
+  });
+}
+/* ══ tabs ══ */
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  $('panel-' + t.dataset.tab).classList.add('active');
+  if (t.dataset.tab === 'lab') requestAnimationFrame(drawChart);
+}));
+/* ══ mode cards ══ */
+function renderModes() {
+  $('modeCards').innerHTML = Object.entries(MODES).map(([m, [t]]) =>
+    `<div class="modecard" data-m="${m}"><b>${t}</b></div>`).join('');
+  $('modeCards').querySelectorAll('.modecard').forEach(c => c.addEventListener('click', () => {
+    CFG.GAME_MODE = c.dataset.m; syncModeUI();
+  }));
+}
+function syncModeUI() {
+  const m = String(CFG.GAME_MODE || '3');
+  document.querySelectorAll('.modecard').forEach(c => c.classList.toggle('sel', c.dataset.m === m));
+  $('modeDesc').innerHTML = `<b>${MODES[m][0]}</b><br>${MODES[m][1]}`;
+  if ($('labMode')) $('labMode').value = m;
+}
+/* ══ config load/save ══ */
+function toast(msg, type = 'ok', ms = 3000) {
+  const t = $('toast'); t.textContent = msg; t.className = 'show ' + type;
+  clearTimeout(t._t); t._t = setTimeout(() => t.className = '', ms);
+}
+async function ping() {
+  try { const r = await fetch('/ping', { signal: AbortSignal.timeout(2500) }); return r.ok; }
+  catch { return false; }
+}
+async function updateStatus() {
+  const ok = await ping();
+  $('dot').classList.toggle('on', ok);
+  $('srvTxt').textContent = ok ? 'Online ✓' : 'Offline — รัน dice-server.py';
+}
+function collectCFG() {
+  const d = { ...CFG };
+  ALL_KEYS.forEach(k => {
+    const el = document.getElementById(k);
+    if (!el) return;
+    d[k] = el.type === 'checkbox' ? (el.checked ? '1' : '0') : el.value.trim();
+  });
+  d.GAME_MODE = CFG.GAME_MODE || d.GAME_MODE || '3';
+  return d;
+}
+function applyCFG(d) {
+  CFG = { ...d };
+  ALL_KEYS.forEach(k => {
+    const el = document.getElementById(k);
+    if (!el) return;
+    if (el.type === 'checkbox') el.checked = ['1', 'true'].includes(String(d[k] ?? '0'));
+    else el.value = d[k] ?? '';
+  });
+  document.querySelectorAll('input[type=range]').forEach(r => {
+    const num = document.getElementById(r.id.replace(/R$/, ''));
+    if (num && num.value !== '' && +num.value >= +r.min && +num.value <= +r.max) {
+      r.value = num.value;
+      r.style.setProperty('--pct', (r.value - r.min) / (r.max - r.min) * 100 + '%');
+    }
+  });
+  syncModeUI();
+}
+async function loadConfig(silent = false) {
+  try {
+    const r = await fetch('/get');
+    if (!r.ok) throw 0;
+    applyCFG(await r.json());
+    if (!silent) toast('✓ โหลด config แล้ว');
+  } catch { if (!silent) toast('⚠ เซิร์ฟเวอร์ออฟไลน์', 'info'); }
+}
+async function saveConfig() {
+  const data = collectCFG();
+  try {
+    const r = await fetch('/set', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    const j = await r.json();
+    if (j.ok) { CFG = data; toast('✅ บันทึก dice.env แล้ว'); }
+    else toast('❌ ' + (j.error || 'save failed'), 'err');
+  } catch (e) { toast('❌ ' + e.message, 'err'); }
+}
+/* ══ lab run ══ */
+let lastResult = null;
+function labPayload() {
+  const v = id => { const s = $(id).value.trim(); return s === '' ? undefined : s; };
+  const p = { mode: +$('labMode').value, rounds: +$('labRounds').value || 1000 };
+  const sb = v('labBalance'); if (sb !== undefined) p.startBalance = +sb;
+  const bb = v('labBaseBet'); if (bb !== undefined) p.baseBet = +bb;
+  const ch = v('labChance'); if (ch !== undefined) p.chance = +ch;
+  const st = $('labStrategy').value; if (st) p.strategy = st;
+  const ml = v('labMaxLoss'); if (ml !== undefined) p.maxLoss = +ml;
+  const sw = v('labStopWin'); if (sw !== undefined) p.stopWin = +sw;
+  const sl = v('labStopWagered'); if (sl !== undefined) p.stopWagered = +sl;
+  const ow = v('labOnWin'); if (ow !== undefined) p.onWin = +ow;
+  const wc = v('labWagerChance'); if (wc !== undefined) p.wagerChance = +wc;
+  const seed = v('labSeed'); if (seed !== undefined) p.seed = +seed;
+  if ($('labRare').checked) p.rare = true;
+  if ($('labUseCfg').checked) p.config = collectCFG();
+  return p;
+}
+async function runLab() {
+  const btn = $('btnRun');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> กำลังรัน…';
+  const t0 = performance.now();
+  try {
+    const r = await fetch('/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(labPayload()) });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'run failed');
+    lastResult = j;
+    renderResult(j, (performance.now() - t0) / 1000);
+    toast(`✓ รันเสร็จ ${j.summary.rounds.toLocaleString()} รอบ`);
+  } catch (e) { toast('❌ ' + e.message, 'err'); }
+  finally { btn.disabled = false; btn.textContent = '▶ รันจำลอง'; }
+}
+const fmt = (n, d = 4) => n === null || n === undefined || isNaN(+n) ? '—' : (+n).toFixed(d);
+function renderResult(j, secs) {
+  const s = j.summary;
+  const pnl = $('kPnl'); pnl.textContent = (s.net_pnl >= 0 ? '+' : '') + fmt(s.net_pnl, 4);
+  pnl.className = 'v ' + (s.net_pnl > 0 ? 'green' : s.net_pnl < 0 ? 'red' : '');
+  $('kBal').textContent = fmt(s.balance, 4);
+  $('kWin').textContent = `${s.wins}W/${s.losses}L · ${fmt(s.win_rate, 1)}%`;
+  $('kStreak').textContent = s.max_loss_streak;
+  $('kRounds').textContent = s.rounds.toLocaleString();
+  $('kWager').textContent = fmt(s.wagered, 2);
+  const badge = $('stopBadge');
+  if (s.stop_reason) { badge.style.display = ''; badge.textContent = '⏹ ' + s.stop_reason; }
+  else badge.style.display = 'none';
+  $('chartInfo').textContent = `${s.engine_mode} · seed ${s.seed ?? 'สุ่ม'} · ${secs.toFixed(1)}s`;
+  drawChart();
+  // recent table
+  const rows = j.recent || [];
+  $('recentN').textContent = rows.length;
+  $('recentTbl').innerHTML = rows.length ? `<table class="rt"><thead><tr><th>#</th><th>Roll</th><th>ผล</th><th>Bet</th><th>PnL</th><th>Balance</th><th>แพ้ติด</th></tr></thead><tbody>` +
+    rows.map(r => `<tr><td>${r.Round}</td><td>${r.Roll}</td><td class="${r.Result === 'win' ? 'win' : 'loss'}">${r.Result === 'win' ? 'WIN' : 'LOSS'}</td><td>${fmt(r.Bet, 4)}</td><td>${fmt(r.RoundPnL, 4)}</td><td>${fmt(r.Balance, 2)}</td><td>${r.LossStreak}</td></tr>`).join('') + `</tbody></table>` : '—';
+  const box = $('recentTbl'); box.scrollTop = box.scrollHeight;
+  // events
+  let html = '';
+  (s.top_wins || []).forEach((w, i) => { html += `<div class="ev good">🏆 #${i + 1} +${fmt(w.amount, 4)} · รอบ ${w.round} · ${w.mode}</div>`; });
+  (s.events || []).slice(-12).reverse().forEach(e => {
+    const cls = /RECOVER|WIN|🎯/.test(e) ? 'good' : /DANGER|ALERT|BUST|Streak/.test(e) ? 'bad' : /SWITCH|MILESTONE/.test(e) ? 'warn' : '';
+    html += `<div class="ev ${cls}">${e}</div>`;
+  });
+  (s.rare_hits || []).slice(-5).reverse().forEach(h => { html += `<div class="ev warn">🎯 ${h.tag} · รอบ ${h.round} · roll ${h.roll} · +${fmt(h.won, 4)}</div>`; });
+  $('eventFeed').innerHTML = html || '<div class="empty">ไม่มีเหตุการณ์พิเศษ</div>';
+}
+function drawChart() {
+  const cv = $('equity'); if (!cv || !cv.clientWidth) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth, H = cv.clientHeight || 220;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const c = cv.getContext('2d'); c.scale(dpr, dpr);
+  c.clearRect(0, 0, W, H);
+  const j = lastResult;
+  if (!j || !j.equity.length) {
+    c.fillStyle = '#7d8aa5'; c.font = '13px system-ui'; c.textAlign = 'center';
+    c.fillText('กราฟจะปรากฏหลังกด “▶ รันจำลอง”', W / 2, H / 2);
+    return;
+  }
+  const key = $('chartSel').value;
+  const pts = j.equity.map(p => ({ x: p.round, y: p[key] }));
+  let mn = Math.min(...pts.map(p => p.y)), mx = Math.max(...pts.map(p => p.y));
+  if (key === 'balance') { mn = Math.min(mn, j.summary.start_balance); mx = Math.max(mx, j.summary.start_balance); }
+  if (mn === mx) { mn -= 1; mx += 1; }
+  const pad = (mx - mn) * 0.08; mn -= pad; mx += pad;
+  const L = 56, R = 10, T = 10, B = 22;
+  const X = x => L + (x - pts[0].x) / Math.max(1, pts[pts.length - 1].x - pts[0].x) * (W - L - R);
+  const Y = y => T + (1 - (y - mn) / (mx - mn)) * (H - T - B);
+  c.strokeStyle = 'rgba(99,120,200,.15)'; c.fillStyle = '#7d8aa5'; c.font = '10px ui-monospace,monospace'; c.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = mn + (mx - mn) * i / 4;
+    c.beginPath(); c.moveTo(L, Y(y)); c.lineTo(W - R, Y(y)); c.stroke();
+    c.textAlign = 'right'; c.fillText(y.toFixed(2), L - 6, Y(y) + 3);
+  }
+  c.textAlign = 'center';
+  c.fillText(pts[0].x, L, H - 6); c.fillText(pts[pts.length - 1].x, W - R, H - 6);
+  if (key === 'balance') {
+    c.setLineDash([5, 4]); c.strokeStyle = 'rgba(125,138,165,.6)';
+    c.beginPath(); c.moveTo(L, Y(j.summary.start_balance)); c.lineTo(W - R, Y(j.summary.start_balance)); c.stroke();
+    c.setLineDash([]);
+  }
+  const last = pts[pts.length - 1].y, up = last >= pts[0].y;
+  const grad = c.createLinearGradient(0, T, 0, H - B);
+  grad.addColorStop(0, up ? 'rgba(52,211,153,.35)' : 'rgba(248,113,113,.35)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  c.beginPath(); c.moveTo(X(pts[0].x), Y(pts[0].y));
+  pts.forEach(p => c.lineTo(X(p.x), Y(p.y)));
+  c.lineTo(X(last ? pts[pts.length - 1].x : 0), H - B); c.lineTo(X(pts[0].x), H - B); c.closePath();
+  c.fillStyle = grad; c.fill();
+  c.beginPath(); c.moveTo(X(pts[0].x), Y(pts[0].y));
+  pts.forEach(p => c.lineTo(X(p.x), Y(p.y)));
+  c.strokeStyle = up ? '#34d399' : '#f87171'; c.lineWidth = 1.8; c.stroke();
+  c.fillStyle = up ? '#34d399' : '#f87171';
+  c.beginPath(); c.arc(X(pts[pts.length - 1].x), Y(last), 3.5, 0, 7); c.fill();
+}
+/* ══ calc ══ */
+let lastCalc = null;
+async function solveCalc(save) {
+  const btn = $('btnCalc'); btn.disabled = true;
+  try {
+    const body = {
+      balance: +$('cBal').value || 10, mul: +$('cMul').value || 1.06, chance: +$('cChance').value || 3.96,
+      coverage: (+$('cCov').value || 100) / 100, save: !!save,
+    };
+    if ($('cMode').value === 'manual') body.n = +$('cN').value || 50;
+    else body.risk = +$('cRisk').value;
+    const r = await fetch('/calc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'calc failed');
+    lastCalc = j; renderCalc(j);
+    $('btnCalcSave').disabled = false;
+    if (save) { toast('💾 บันทึก Survivor ลง dice.env แล้ว'); loadConfig(true); }
+  } catch (e) { toast('❌ ' + e.message, 'err'); }
+  finally { btn.disabled = false; }
+}
+function renderCalc(j) {
+  const badge = j.feasible
+    ? `<div class="ev good">✅ ทุนพอ — เบทนี้รอด ${j.n} ไม้แดงติดพอดี (exposure ${j.exposure_pct !== null ? j.exposure_pct.toFixed(2) + '%' : '∞'} ของทุน)</div>`
+    : `<div class="ev bad">⛔ ทุนไม่พอ — รองรับได้แค่ N=${j.max_coverable_n} แสดงค่าที่แนะนำแทน</div>`;
+  $('calcOut').innerHTML = `
+    <h3>🧮 ผลคำนวณ ${j.n_auto !== null && j.n_auto !== undefined ? `(Auto N จากความเสี่ยง ${(+$('cRisk').value * 100).toFixed(2)}%)` : '(Manual N)'}</h3>
+    ${badge}
+    <div class="kpis" style="grid-template-columns:repeat(3,1fr);margin:10px 0">
+      <div class="kpi"><div class="l">Solved basebet</div><div class="v green">${fmt(j.base, 8)}</div></div>
+      <div class="kpi"><div class="l">N ที่ครอบคลุม</div><div class="v blue">${j.n} ไม้</div></div>
+      <div class="kpi"><div class="l">P(แดง ${j.n} ติด)</div><div class="v orange">${(j.streak_prob * 100).toFixed(4)}%</div></div>
+      <div class="kpi"><div class="l">Max exposure</div><div class="v yellow">${fmt(j.exposure, 4)}</div></div>
+      <div class="kpi"><div class="l">Balance</div><div class="v">${fmt(j.balance, 2)}</div></div>
+      <div class="kpi"><div class="l">ตัวคูณ / chance</div><div class="v purple">${j.mul}× · ${j.chance}%</div></div>
+    </div>
+    <h3>📊 ตารางเบทเมื่อแพ้ติด (โชว์ ${j.progression.length} ระดับ${j.truncated ? 'แรก' : ''})</h3>
+    <div class="prog">${j.progression.map(p => `<div><span>แพ้ #${p.level}</span><span>bet ${fmt(p.bet, 8)}</span><span>สะสม ${fmt(p.cumulative, 4)}</span></div>`).join('')}</div>
+    ${j.truncated ? `<div class="hint" style="margin-top:8px">…อีก ${j.n - 20} ระดับถึง N=${j.n}</div>` : ''}`;
+}
+/* ══ wiring ══ */
+function pairRange(rId, nId) {
+  const r = $(rId), n = $(nId);
+  const paint = () => r.style.setProperty('--pct', (r.value - r.min) / (r.max - r.min) * 100 + '%');
+  r.addEventListener('input', () => { n.value = r.value; paint(); });
+  n.addEventListener('input', () => { if (+n.value >= +r.min && +n.value <= +r.max) { r.value = n.value; paint(); } });
+  paint();
+}
+renderModes();
+renderGroups($('fGlobal'), [['Global defaults', 'global']]);
+renderGroups($('fModes'), [['Mode 1 — Escalation', 'm1'], ['Mode 2 — High-Frequency', 'm2'], ['Mode 3 — Dual-Strategy', 'm3'], ['Mode 5 — Survivor', 'm5'], ['Mode 4 — พื้นฐาน', 'm4base'], ['Mode 4 — ตัวคูณเมื่อแพ้', 'm4loss'], ['Mode 4 — เปลี่ยนค่าเมื่อแดงติด', 'm4chg'], ['Mode 4 — เมื่อชนะ', 'm4win']]);
+renderGroups($('fAdv'), [['Reset triggers (0=ปิด)', 'm4reset'], ['Stop triggers (0=ปิด)', 'm4stop'], ['ขอบเขต & ขั้นสูง', 'm4adv']]);
+$('focusMode').addEventListener('change', e => {
+  const v = e.target.value;
+  $('fModes').querySelectorAll('.seclabel').forEach(s => {
+    const show = v === 'all' || s.textContent.includes('Mode ' + v);
+    s.style.display = show ? '' : 'none';
+    let el = s.nextElementSibling;
+    while (el && !el.classList.contains('seclabel')) { el.style.display = show ? '' : 'none'; el = el.nextElementSibling; }
+  });
+});
+pairRange('labRoundsR', 'labRounds');
+pairRange('cMulR', 'cMul'); pairRange('cChanceR', 'cChance'); pairRange('cCovR', 'cCov');
+$('cCovR').addEventListener('input', e => $('cCov').value = e.target.value);
+$('cCov').addEventListener('input', e => { if (+e.target.value >= 10 && +e.target.value <= 100) $('cCovR').value = e.target.value; });
+$('cMode').addEventListener('change', e => {
+  const man = e.target.value === 'manual';
+  $('cNWarp').style.display = man ? '' : 'none';
+  $('cRiskWarp').style.display = man ? 'none' : '';
+});
+$('labMode').addEventListener('change', e => { CFG.GAME_MODE = e.target.value; syncModeUI(); });
+$('labRounds').addEventListener('input', e => { if (+e.target.value >= 10 && +e.target.value <= 50000) $('labRoundsR').value = e.target.value; });
+$('chartSel').addEventListener('change', drawChart);
+window.addEventListener('resize', drawChart);
+$('btnSave').addEventListener('click', saveConfig);
+$('btnReload').addEventListener('click', () => { loadConfig(); updateStatus(); });
+$('btnRun').addEventListener('click', runLab);
+$('btnSeed').addEventListener('click', () => $('labSeed').value = Math.floor(Math.random() * 100000));
+$('btnCsv').addEventListener('click', () => window.open('/csv', '_blank'));
+$('btnCalc').addEventListener('click', () => solveCalc(false));
+$('btnCalcSave').addEventListener('click', () => solveCalc(true));
+(async () => { await updateStatus(); await loadConfig(true); drawChart(); })();
+setInterval(updateStatus, 30000);
+</script>
+</body>
+</html>

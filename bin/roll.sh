@@ -1,0 +1,647 @@
+#!/usr/bin/env bash
+
+# ============================================================
+# MARTINGALE DICE SIMULATOR - Guideline / Template
+# ============================================================
+# Strategy:
+#   - lose -> bet x dynamic recovering multiplier (LOSEMUL)
+#   - win  -> reset to BASE_BET
+# ============================================================
+set -uo pipefail
+
+# ─────────────────────────────────────────
+# [0] HELPER COLOR  (standalone — no SSOT dependency)
+# ─────────────────────────────────────────
+if ! declare -F cn >/dev/null 2>&1; then
+    cn() {  # cn <256-code> <b|d> <text...>
+        local code="$1" style="$2"; shift 2
+        local bold="" dim=""
+        [[ "$style" == "b" ]] && bold="1;"
+        [[ "$style" == "d" ]] && dim="2;"
+        printf "\033[%s38;5;%sm%s\033[0m" "$bold" "$code" "$*"
+    }
+fi
+
+_wc() { cn 255 b "$@"; } #white color
+_gr(){ cn 235 d "$@"; } #gray color
++c(){ cn 82 b "$@"; }  #win color
+-c(){ cn 124 b "$@"; }  #lose color
+
+# ─────────────────────────────────────────
+# [0.1] MATH HELPER  (standalone — vendored, no SSOT dependency)
+# ─────────────────────────────────────────
+if ! declare -F mth >/dev/null 2>&1; then
+    _dice_lib="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)/lib/maths.sh"
+    if [[ -f "$_dice_lib" ]]; then
+        # shellcheck source=/dev/null
+        source "$_dice_lib"
+    else
+        echo "roll.sh: math helper not found at $_dice_lib" >&2
+        exit 1
+    fi
+    unset _dice_lib
+fi
+
+# ─────────────────────────────────────────
+# [1] CONFIGURATION  (config/dice.env + Flag args)
+# ─────────────────────────────────────────
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
+CONFIG_FILE="${DICE_CONFIG:-$REPO_ROOT/config/dice.env}"
+if [[ -f "$CONFIG_FILE" ]]; then
+    source "$CONFIG_FILE"
+    # SSOT Fallback mappings
+    BASE_BET="${BASE_BET:-${GLOBAL_BASE_BET:-${PROFIT_BASE_BET:-0.01487629}}}"
+    WIN_CHANCE="${WIN_CHANCE:-${GLOBAL_WIN_CHANCE:-${PROFIT_WIN_CHANCE:-3.96}}}"
+    BET_STRATEGY="${BET_STRATEGY:-${GLOBAL_BET_TARGET:-high}}"
+    MAX_ROUNDS="${MAX_ROUNDS:-${GLOBAL_MAX_ROUNDS:-200000}}"
+    MAX_LOSS_STREAK="${MAX_LOSS_STREAK:-${PROFIT_MAX_LOSS_STREAK:-500}}"
+    STOP_ON_WIN="${STOP_ON_WIN:-${PROFIT_STOP_ON_WIN:-${GLOBAL_STOP_ON_WIN:-50000}}}"
+    LOSS_TRIGGER="${LOSS_TRIGGER:-${HYBRID_LOSS_TRIGGER:-2.0}}"
+    PROFIT_TRIGGER="${PROFIT_TRIGGER:-${HYBRID_PROFIT_TRIGGER:-1.0}}"
+    STOP_PROFIT_TARGET="${STOP_PROFIT_TARGET:-${PROFIT_STOP_TARGET:-${GLOBAL_STOP_PROFIT:-200.0}}}"
+    STOP_LOSS_TARGET="${STOP_LOSS_TARGET:-${GLOBAL_STOP_LOSS:-0.0}}"
+    WAGER_BET="${WAGER_BET:-${WAGER_BET_PCT:-2.5}}"
+    WAGER_TARGET="${WAGER_TARGET:-1000000.0}"
+    WAGER_STOP_ON_WIN="${WAGER_STOP_ON_WIN:-50000}"
+    WAGER_WIN_CHANCE="${WAGER_WIN_CHANCE:-98.0}"
+else
+    # Fallback defaults if dice.env missing
+    HE=1.0
+    GAME_MODE=3
+    START_BALANCE=10000
+    STOP_PROFIT_TARGET=20.0
+    STOP_LOSS_TARGET=10.0
+    BASE_BET=2.0
+    WIN_CHANCE=3.96
+    MAX_ROUNDS=20000
+    MAX_LOSS_STREAK=10000
+    STOP_ON_WIN=5000
+    BET_STRATEGY="high"
+    LOSS_TRIGGER=2.0
+    PROFIT_TRIGGER=1.0
+    WAGER_BET="2.5"
+    WAGER_WIN_CHANCE=98.0
+    WAGER_TARGET=200000.0
+    WAGER_STOP_ON_WIN=5000
+fi
+
+# --- flag parser ---
+_usage() {
+    echo "Usage: $0 [OPTIONS]"
+    echo "  -m  | --mode           Game mode: 1(profit), 2(wager), 3(hybrid) (default: $GAME_MODE)"
+    echo "  -b  | --basebet        Base bet amount          (default: $BASE_BET)"
+    echo "  -c  | --chance         Win chance % (Profit)    (default: $WIN_CHANCE)"
+    echo "  -wc | --wager-chance   Win chance % (Wager)     (default: $WAGER_WIN_CHANCE)"
+    echo "  -sb | --startbalance   Starting balance         (default: $START_BALANCE)"
+    echo "  -r  | --rounds         Max rounds               (default: $MAX_ROUNDS)"
+    echo "  -ml | --maxloss        Max loss streak          (default: $MAX_LOSS_STREAK)"
+    echo "  -sw | --stop-win       Stop profit target       (default: auto calculated)"
+    echo "  -sl | --stop-wagered   Wager limit target       (default: $WAGER_TARGET)"
+    echo "  -ow | --on-win         Stop after N wins        (default: $STOP_ON_WIN)"
+    echo "  -s  | --strategy       Bet strategy low|high    (default: $BET_STRATEGY)"
+    echo "  -h  | --help           Show this help"
+    exit 0
+}
+
+CLI_STOP_PROFIT=""
+CLI_WAGER_TARGET=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -m|--mode)           GAME_MODE="$2";          shift 2 ;;
+        -b|--basebet)        BASE_BET="$2";           shift 2 ;;
+        -c|--chance)         WIN_CHANCE="$2";         shift 2 ;;
+        -wc|--wager-chance)  WAGER_WIN_CHANCE="$2";   shift 2 ;;
+        -sb|--startbalance)  START_BALANCE="$2";      shift 2 ;;
+        -r|--rounds)         MAX_ROUNDS="$2";         shift 2 ;;
+        -ml|--maxloss)       MAX_LOSS_STREAK="$2";    shift 2 ;;
+        -sw|--stop-win)      CLI_STOP_PROFIT="$2";    shift 2 ;;
+        -sl|--stop-wagered)  CLI_WAGER_TARGET="$2";   shift 2 ;;
+        -ow|--on-win)        STOP_ON_WIN="$2";        shift 2 ;;
+        -s|--strategy)       BET_STRATEGY="$2";       shift 2 ;;
+        -h|--help)           _usage ;;
+        *) echo "Unknown flag: $1" >&2; _usage ;;
+    esac
+done
+
+bet_target="$BET_STRATEGY"
+
+# Dynamic targets calculation based on real START_BALANCE
+if [[ -n "$CLI_STOP_PROFIT" ]]; then
+    STOP_PROFIT="$CLI_STOP_PROFIT"
+else
+    STOP_PROFIT=$(mth "($STOP_PROFIT_TARGET/100)*$START_BALANCE" 8 d)
+fi
+
+if [[ -n "$CLI_WAGER_TARGET" ]]; then
+    WAGER_TARGET="$CLI_WAGER_TARGET"
+fi
+
+# ─────────────────────────────────────────
+# [1.5] MATH HELPERS
+# ─────────────────────────────────────────
+fadd() {
+    mth "$1+$2" 8 d
+}
+
+fsub() {
+    mth "$1-$2" 8 d
+}
+
+fmul() {
+    mth "$1*$2" 8 d
+}
+
+float_div() {
+    mth "$1/$2" 8 d
+}
+
+fgt() {
+    awk -v a="$1" -v b="$2" 'BEGIN { exit !(a > b) }'
+}
+
+fgte() {
+    awk -v a="$1" -v b="$2" 'BEGIN { exit !(a >= b) }'
+}
+
+STOP_LOSS=$(mth "($STOP_LOSS_TARGET/100)*$START_BALANCE" 8 d)
+WAGER_BASE_BET=$(mth "($WAGER_BET/100)*$START_BALANCE" 8 d)
+
+TRIGGER_BALANCE=$(mth "(1-($LOSS_TRIGGER/100))*$START_BALANCE" 8 d)
+TRIGGER_BALANCE_PROFIT=$(mth "$START_BALANCE+($PROFIT_TRIGGER/100)*$START_BALANCE" 8 d)
+
+# Payout & Thresholds for PROFIT MODE
+payout=$(mth "(1-($HE/100))/($WIN_CHANCE/100)" 4 d)
+profit_win_mul=$(mth "$payout - 1" 4 d)
+if fgte "1.0001" "$payout"; then LOSEMUL=2.0000; else LOSEMUL=$(mth "1 + (1 / ($payout - 1)) + (0.05 / $payout)" 4 d); fi
+profit_threshold_low=$(mth "$WIN_CHANCE*100" 0 d)
+profit_threshold_high=$(mth "(100-$WIN_CHANCE)*100" 0 d)
+
+# Payout & Thresholds for WAGER MODE
+wager_payout=$(mth "(1-($HE/100))/($WAGER_WIN_CHANCE/100)" 4 d)
+wager_win_mul=$(mth "$wager_payout - 1" 4 d)
+wager_threshold_low=$(mth "$WAGER_WIN_CHANCE*100" 0 d)
+wager_threshold_high=$(mth "(100-$WAGER_WIN_CHANCE)*100" 0 d)
+
+# ─────────────────────────────────────────
+# [2] GLOBAL STATE
+# ─────────────────────────────────────────
+balance=$START_BALANCE
+wagered=0
+total_profit=0
+profit_vault=0          # --- Vault for securing profits from recovery cycles
+round=0
+win_count=0
+win_streak=0
+lose_count=0
+loss_streak=0
+max_loss_streak=0
+last_roll=0
+win_history=""
+
+# Initial Mode & Initial Bet
+if [[ "$GAME_MODE" == "2" ]]; then
+    MODE="WAGER"
+    nextbet=$WAGER_BASE_BET
+elif [[ "$GAME_MODE" == "3" ]]; then
+    MODE="WAGER"
+    nextbet=$WAGER_BASE_BET
+else
+    MODE="PROFIT"
+    nextbet=$BASE_BET
+fi
+
+rare_number9900x=0
+rare_number4950x=0
+rare_number3300x=0
+rare_number2475x=0
+rare_number1980x=0
+rare_number1650x=0
+rare_number1414x=0
+rare_number1237x=0
+rare_number1100x=0
+rare_number990x=0
+wrong_side=0
+
+
+# ─────────────────────────────────────────
+# [4] ROLL DICE (Mode Aware)
+# ─────────────────────────────────────────
+roll_dice() {
+    local mode="$1"
+    local roll
+    roll=$(( RANDOM % 10000 ))
+    last_roll="$roll"
+
+    local t_low t_high
+    if [[ "$mode" == "WAGER" ]]; then
+        t_low="$wager_threshold_low"
+        t_high="$wager_threshold_high"
+    else
+        t_low="$profit_threshold_low"
+        t_high="$profit_threshold_high"
+    fi
+
+    if [[ "$bet_target" == "low" ]]; then
+        if (( roll < t_low )); then
+            result="win"
+        else
+            result="lose"
+            (( roll >= t_high )) && (( wrong_side++ ))
+        fi
+    else # bet_target == "high"
+        if (( roll >= t_high )); then
+            result="win"
+        else
+            result="lose"
+            (( roll < t_low )) && (( wrong_side++ ))
+        fi
+    fi
+}
+
+# ─────────────────────────────────────────
+# [5] MODES LOGIC
+# ─────────────────────────────────────────
+profit_mode() {
+    local result="$1"
+    local bet="$2"
+
+    if [[ "$result" == "win" ]]; then
+        win_amount=$(fmul "$bet" "$profit_win_mul")
+        balance=$(fadd "$balance" "$win_amount")
+        total_profit=$(fadd "$(fsub "$balance" "$START_BALANCE")" "$profit_vault")
+        nextbet=$BASE_BET
+        loss_streak=0
+        ((win_count++))
+        ((win_streak++))
+    else
+        balance=$(fsub "$balance" "$bet")
+        nextbet=$(fmul "$bet" "$LOSEMUL")
+        total_profit=$(fadd "$(fsub "$balance" "$START_BALANCE")" "$profit_vault")
+        win_streak=0
+        ((loss_streak++))
+        ((lose_count++))
+
+        if (( loss_streak > max_loss_streak )); then
+            max_loss_streak=$loss_streak
+        fi
+    fi
+}
+
+wagering_mode() {
+    local result="$1"
+    local bet="$2"
+
+    if [[ "$result" == "win" ]]; then
+        win_amount=$(fmul "$bet" "$wager_win_mul")
+        balance=$(fadd "$balance" "$win_amount")
+        total_profit=$(fadd "$(fsub "$balance" "$START_BALANCE")" "$profit_vault")
+        nextbet=$WAGER_BASE_BET
+        loss_streak=0
+        ((win_count++))
+        ((win_streak++))
+    else
+        balance=$(fsub "$balance" "$bet")
+        nextbet=$WAGER_BASE_BET
+        total_profit=$(fadd "$(fsub "$balance" "$START_BALANCE")" "$profit_vault")
+        win_streak=0
+        ((loss_streak++))
+        ((lose_count++))
+
+        if (( loss_streak > max_loss_streak )); then
+            max_loss_streak=$loss_streak
+        fi
+    fi
+}
+
+# Settle current bet and evaluate mode switch for next round
+dobet() {
+    local res="$1"
+    local bet="$2"
+    local current_m="$3"
+
+    # Step 1: Settle current round based on the mode it was played in
+    if [[ "$current_m" == "WAGER" ]]; then
+        wagering_mode "$res" "$bet"
+    else
+        profit_mode "$res" "$bet"
+    fi
+
+    # Step 2: Check for mode transition in Hybrid mode (Mode 3)
+    if [[ "$GAME_MODE" == "3" ]]; then
+        if [[ "$MODE" == "WAGER" ]]; then
+            # Currently in WAGER: Switch to RECOVERY if balance drops to/below trigger
+            if fgte "$TRIGGER_BALANCE" "$balance"; then
+                echo ""
+                cn 196 b "  >>> [MODE SWITCH] ⚠️  Balance dropped below trigger ($TRIGGER_BALANCE) -> RECOVERY (PROFIT MODE) <<<"
+                MODE="PROFIT"
+                nextbet=$BASE_BET
+                loss_streak=0
+            fi
+        elif [[ "$MODE" == "PROFIT" ]]; then
+            # Currently in RECOVERY (PROFIT): Check if capital is recovered
+            local recovered=false
+            if [[ "$res" == "win" ]] && fgte "$balance" "$START_BALANCE"; then
+                recovered=true
+            elif fgte "$balance" "$TRIGGER_BALANCE_PROFIT"; then
+                recovered=true
+            fi
+
+            if [[ "$recovered" == true ]]; then
+                # Skim surplus profit into vault and reset main balance to START_BALANCE
+                local surplus=$(fsub "$balance" "$START_BALANCE")
+                profit_vault=$(fadd "$profit_vault" "$surplus")
+                balance=$START_BALANCE
+                total_profit=$profit_vault
+
+                echo ""
+                cn 46 b "  >>> [MODE SWITCH] 🎯 Capital recovered! Secured +$surplus to Vault (Total Vault: $profit_vault) <<<"
+                cn 46 b "  >>> Main Balance reset to $START_BALANCE -> RESUME WAGER MODE <<<"
+                MODE="WAGER"
+                nextbet=$WAGER_BASE_BET
+                loss_streak=0
+            fi
+        fi
+    fi
+}
+
+# ─────────────────────────────────────────
+# [6] STOP CONDITIONS
+# ─────────────────────────────────────────
+stop_condition() {
+    # (a) balance depleted
+    if ! fgt "$balance" 0; then
+        echo "BUST: balance depleted"
+        return 0
+    fi
+    # (b) loss streak exceeded limit
+    if (( loss_streak >= MAX_LOSS_STREAK )); then
+        echo "MAX_STREAK: $loss_streak consecutive losses"
+        return 0
+    fi
+    # (c) next bet > balance
+    if fgt "$nextbet" "$balance"; then
+        echo "BET_GT_BAL: bet=$nextbet balance=$balance"
+        return 0
+    fi
+
+    # (d) profit target reached
+    if fgte "$total_profit" "$STOP_PROFIT"; then
+        echo "PROFIT REACHED: $STOP_PROFIT"
+        return 0
+    fi
+
+    # (e) wager target reached
+    if fgte "$wagered" "$WAGER_TARGET"; then
+        echo "WAGER REACHED: $WAGER_TARGET"
+        return 0
+    fi
+
+    return 1
+}
+
+# ─────────────────────────────────────────
+# [7] PRINT ROUND
+# ─────────────────────────────────────────
+print_round() {
+    local roll="$1"
+    local result="$2"
+    local bet="$3"
+    local total_profit="$4"
+    local current_mode="$5"
+    local icon r_fmt roll_fmt bal_fmt stk_fmt roll_c mode_badge
+
+    printf -v r_fmt    "%3d"    "$round"
+    printf -v roll_fmt "%4d"    "$roll"
+    printf -v bal_fmt  "%13.8f" "$balance"
+    printf -v stk_fmt  "%2d"    "$loss_streak"
+
+    # Color balance based on start balance
+    if fgt "$START_BALANCE" "$balance"; then
+        local bal_c=$(cn 124 b "$bal_fmt")
+    else
+        local bal_c=$(cn 28 b "$bal_fmt")
+    fi
+
+    # Threshold for highlighting wrong side
+    local active_high active_low
+    if [[ "$current_mode" == "WAGER" ]]; then
+        active_high="$wager_threshold_high"
+        active_low="$wager_threshold_low"
+    else
+        active_high="$profit_threshold_high"
+        active_low="$profit_threshold_low"
+    fi
+
+    if [[ "$bet_target" == "low" ]] && (( roll >= active_high )); then
+        roll_c="$(cn 45 b "$roll_fmt")"
+    elif [[ "$bet_target" == "high" ]] && (( roll < active_low )); then
+        roll_c="$(cn 45 b "$roll_fmt")"
+    else
+        roll_c="$(cn 245 d "$roll_fmt")"
+    fi
+
+    # Mode Badge
+    if [[ "$current_mode" == "PROFIT" ]]; then
+        mode_badge="$(cn 208 b "PROFIT")"
+    else
+        mode_badge="$(cn 75 b "WAGER ")"
+    fi
+
+    if [[ "$result" == "win" ]]; then
+        icon="$(+c "WIN ")"
+    else
+        icon="$(-c "LOSS")"
+    fi
+
+    # Print based on Mode Purpose
+    if [[ "$current_mode" == "WAGER" ]]; then
+        local pct=$(mth "($wagered/$WAGER_TARGET)*100" 1 d)
+        printf -v w_fmt "%8.2f/%-8.2f (%5.1f%%)" "$wagered" "$WAGER_TARGET" "$pct"
+        local w_c=$(cn 141 b "$w_fmt")
+
+        if [[ "$result" == "win" ]]; then
+            printf -v win_str "+%10.8f" "$win_amount"
+            printf "[%s] | %s | R:%s | %s | Wager:%s | Won:%s | Bal:%s\n" \
+                "$r_fmt" "$mode_badge" "$roll_c" "$icon" "$w_c" "$(+c "$win_str")" "$bal_c"
+        else
+            printf "[%s] | %s | R:%s | %s | Wager:%s | Bal:%s | Stk:%s\n" \
+                "$r_fmt" "$mode_badge" "$roll_c" "$icon" "$w_c" "$bal_c" "$stk_fmt"
+        fi
+    else
+        if [[ "$result" == "win" ]]; then
+            printf -v amt_fmt "%12.8f" "$win_amount"
+            local amt_c="$(+c "+$amt_fmt")"
+            local profit_c="$(+c "+$total_profit")"
+            printf "[%s] | %s | R:%s | %s | Won:%s | PnL:%s | Bal:%s\n" \
+                "$r_fmt" "$mode_badge" "$roll_c" "$icon" "$amt_c" "$profit_c" "$bal_c"
+        else
+            printf -v amt_fmt "%12.8f" "$bet"
+            local amt_c="$amt_fmt"
+            local profit_c
+            if fgt "0" "$total_profit"; then
+                profit_c="$(-c "$total_profit")"
+            else
+                profit_c="$(_gr "$total_profit")"
+            fi
+            printf "[%s] | %s | R:%s | %s | Bet:%s | PnL:%s | Bal:%s | Stk:%s\n" \
+                "$r_fmt" "$mode_badge" "$roll_c" "$icon" "$amt_c" "$profit_c" "$bal_c" "$stk_fmt"
+        fi
+    fi
+}
+
+# ─────────────────────────────────────────
+# [7.1] RARE NUMBER HUNT
+# ─────────────────────────────────────────
+hunting() {
+    local last_roll="$1"
+    if (( last_roll == 9999 || last_roll == 0 )); then
+        (( rare_number9900x++ ))
+    elif (( last_roll == 9998 || last_roll == 1 )); then
+        (( rare_number4950x++ ))
+    elif (( last_roll == 9997 || last_roll == 2 )); then
+        (( rare_number3300x++ ))
+    elif (( last_roll == 9996 || last_roll == 3 )); then
+        (( rare_number2475x++ ))
+    elif (( last_roll == 9995 || last_roll == 4 )); then
+        (( rare_number1980x++ ))
+    elif (( last_roll == 9994 || last_roll == 5 )); then
+        (( rare_number1650x++ ))
+    elif (( last_roll == 9993 || last_roll == 6 )); then
+        (( rare_number1414x++ ))
+    elif (( last_roll == 9992 || last_roll == 7 )); then
+        (( rare_number1237x++ ))
+    elif (( last_roll == 9991 || last_roll == 8 )); then
+        (( rare_number1100x++ ))
+    elif (( last_roll == 9990 || last_roll == 9 )); then
+        (( rare_number990x++ ))
+    fi
+}
+
+# ─────────────────────────────────────────
+# [8] MAIN LOOP
+# ─────────────────────────────────────────
+cn 136 b "=========================================================================="
+cn 255 b "  DICE SIMULATOR - MULTI MODE ENGINE"
+cn 136 b "=========================================================================="
+printf " Mode: %s | Bal: %.8f | Base: %.8f | WagerBet: %.8f\n" \
+    "$MODE" "$START_BALANCE" "$BASE_BET" "$WAGER_BASE_BET"
+printf " ProfitWC: %.2f%% (%.4fx) | WagerWC: %.2f%% (%.4fx)\n" \
+    "$WIN_CHANCE" "$payout" "$WAGER_WIN_CHANCE" "$wager_payout"
+printf " StopProfit: +%.8f | WagerTarget: %.2f | LossTrigger: -%s%% (<=%.2f)\n" \
+    "$STOP_PROFIT" "$WAGER_TARGET" "$LOSS_TRIGGER" "$TRIGGER_BALANCE"
+cn 136 b "=========================================================================="
+
+stop_reason=""
+
+while (( round < MAX_ROUNDS )); do
+    if (( win_count >= STOP_ON_WIN )); then
+        stop_reason="WIN LIMIT: reached $STOP_ON_WIN wins"
+        break
+    fi
+
+    # Check stop conditions
+    if stop_reason=$(stop_condition); then
+        break
+    fi
+
+    ((round++))
+
+    # Freeze current round bet and mode
+    current_bet="$nextbet"
+    round_mode="$MODE"
+
+    wagered=$(fadd "$wagered" "$current_bet")
+
+    # --- roll dice (mode aware) ---
+    roll_dice "$round_mode"
+
+    # --- settle math & check mode transitions ---
+    dobet "$result" "$current_bet" "$round_mode"
+
+    # --- record win history ---
+    if [[ "$result" == "win" ]]; then
+        win_history+="${win_amount}|${round}|${round_mode}"$'\n'
+    fi
+
+    # --- hunting ---
+    hunting "$last_roll"
+
+    # Print log of round played
+    print_round "$last_roll" "$result" "$current_bet" "$total_profit" "$round_mode"
+done
+
+# ─────────────────────────────────────────
+# [9] SESSION SUMMARY
+# ─────────────────────────────────────────
+if fgt "$total_profit" "0"; then
+    profit_c="$(+c "+$total_profit")"
+    bal_c="$(+c "$balance")"
+elif fgt "0" "$total_profit"; then
+    profit_c="$(-c "$total_profit")"
+    bal_c="$(-c "$balance")"
+else
+    profit_c="$(_gr "$total_profit")"
+    bal_c="$(_gr "$balance")"
+fi
+wagered_c="$(cn 245 b "$wagered")"
+vault_c="$(+c "+$profit_vault")"
+
+echo ""
+cn 136 b "=========================================================================="
+cn 255 b "  SESSION SUMMARY"
+cn 136 b "=========================================================================="
+printf "  $(_wc 'Rounds'): %d  $(+c 'W'): %d  $(-c 'L'): %d  $(_wc 'MaxStreak'): %d\n" \
+    "$round" "$win_count" "$lose_count" "$max_loss_streak"
+
+printf "  $(_wc 'Active Balance'): %s\n" "$bal_c"
+printf "  $(_wc 'Profit Vault'):   %s\n" "$vault_c"
+printf "  $(_wc 'Net Total PnL'):  %s\n" "$profit_c"
+printf "  $(_wc 'Wagered'):        %s / %.2f\n" "$wagered_c" "$WAGER_TARGET"
+
+if fgt "$total_profit" "0"; then
+    +c "  Result: PROFIT"
+elif fgt "0" "$total_profit"; then
+    -c "  Result: LOSS"
+else
+    _gr "  Result: BREAK EVEN"
+fi
+
+[[ -n "$stop_reason" ]] && cn 45 b "  Stop Reason: $stop_reason"
+cn 136 b "=========================================================================="
+printf "  $(+c "TOP 5 BIGGEST WINS")\n"
+cn 136 b "=========================================================================="
+if [[ -n "$win_history" ]]; then
+    rank=1
+    while IFS='|' read -r w_amt w_rnd w_mod; do
+        [[ -z "$w_amt" ]] && continue
+        printf -v w_amt_fmt "%12.8f" "$w_amt"
+        w_amt_c="$(+c "+$w_amt_fmt")"
+        w_rnd_c="$(_wc "Round $w_rnd")"
+        if [[ "$w_mod" == "PROFIT" ]]; then
+            w_mod_c="$(cn 208 b "$w_mod")"
+        else
+            w_mod_c="$(cn 75 b "$w_mod")"
+        fi
+        printf "  #%d. %s | %s | %s\n" "$rank" "$w_amt_c" "$w_rnd_c" "$w_mod_c"
+        ((rank++))
+    done < <(printf "%s" "$win_history" | LC_ALL=C sort -t'|' -k1,1rn | head -n 5)
+else
+    printf "  $(_gr "No wins recorded.")\n"
+fi
+cn 136 b "=========================================================================="
+printf "  $(+c "Rare Number")\n" 
+cn 136 b "=========================================================================="
+printf "  $(_wc "9900x"): %d\n" "$rare_number9900x"
+printf "  $(_wc "4950x"): %d\n" "$rare_number4950x"
+printf "  $(_wc "3300x"): %d\n" "$rare_number3300x"
+printf "  $(_wc "2475x"): %d\n" "$rare_number2475x"
+printf "  $(_wc "1980x"): %d\n" "$rare_number1980x"
+printf "  $(_wc "1650x"): %d\n" "$rare_number1650x"
+printf "  $(_wc "1414x"): %d\n" "$rare_number1414x"
+printf "  $(_wc "1237x"): %d\n" "$rare_number1237x"
+printf "  $(_wc "1100x"): %d\n" "$rare_number1100x"
+printf "  $(_wc "990x"): %d\n" "$rare_number990x"
+printf "  $(+c "wrong_side"): %d\n" "$wrong_side"
+echo " "
+cn 136 b "=========================================================================="
