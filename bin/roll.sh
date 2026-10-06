@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 
 # ============================================================
-# MARTINGALE DICE SIMULATOR - Guideline / Template
+# DICE PROBABILITY SIMULATOR - Monte-Carlo educational model (bash engine)
 # ============================================================
-# Strategy:
-#   - lose -> bet x dynamic recovering multiplier (LOSEMUL)
-#   - win  -> reset to BASE_BET
+# Simulated rule (offline, no real money, no network):
+#   - simulated loss -> next simulated stake x multiplier (LOSEMUL)
+#   - simulated win  -> reset to BASE_BET
+# Purpose: study how stake-sizing interacts with negative expected value.
 # ============================================================
 set -uo pipefail
 
