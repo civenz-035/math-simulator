@@ -489,7 +489,7 @@ print_round() {
                 "$r_fmt" "$mode_badge" "$roll_c" "$icon" "$amt_c" "$profit_c" "$bal_c" "$stk_fmt"
         fi
     fi
-}
+ }  
 
 # ─────────────────────────────────────────
 # [7.1] RARE NUMBER HUNT
