@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ------------------------------------------------------------
 # File: maths.sh (Standalone Version)
-# Repository: https://github.com/joece035/maths-helper
+# Repository: https://github.com/civenz-035/maths-helper
 # ------------------------------------------------------------
 # ============================================================
 # mth — Excel-style Maths Helper (human-friendly)
@@ -41,6 +41,7 @@
 #
 # Operators: + - * / ^ %  (^ = power, % = mod; ** also accepted)
 # ============================================================
+
 mth() {
     [[ $# -eq 0 || -z "$*" ]] && {
         cat <<'EOF' >&2
@@ -178,14 +179,10 @@ EOF
     # Replace NUMBERdeg → (NUMBER*3.14159265358979/180)
     # Replace NUMBER°   → (NUMBER*3.14159265358979/180)
     # Replace NUMBERrad → NUMBER  (explicit rad is already radian)
-    # Portable: no GNU-only sed flag `I`. Lowercase the ASCII letters of the
-    # expression first (done above), then match without case-insensitivity.
-    # \b is a GNU extension in BRE, so use [[:<:]] alternatives instead —
-    # handled by rewriting known function names via plain substring matching.
     expr="$(echo "$expr" | sed \
-        -e 's/\([0-9][0-9.]*\)deg/(\1*3.14159265358979\/180)/g' \
-        -e 's/\([0-9][0-9.]*\)°/(\1*3.14159265358979\/180)/g' \
-        -e 's/\([0-9][0-9.]*\)rad/\1/g')"
+        -e 's/\([0-9][0-9.]*\)deg/\(\1*3.14159265358979\/180\)/gI' \
+        -e 's/\([0-9][0-9.]*\)°/\(\1*3.14159265358979\/180\)/g' \
+        -e 's/\([0-9][0-9.]*\)rad/\1/gI')"
 
     # ── 5. Degree Family Functions: expand sind/cosd/tand/asind/acosd/atand ──
     # sind(X)  → sin(X*pi/180)   — accepts degrees, returns numeric
@@ -196,15 +193,13 @@ EOF
     # atand(X) → atan(X)*180/pi
     # Note: We use placeholder token __PI__ to avoid double-expanding pi()
     local PI_VAL="3.14159265358979"
-    # Note: expressions are lowercased in step 2 (outside quoted strings), so
-    # plain substring matching is enough — no GNU-only `\b` word boundary.
     expr="$(echo "$expr" | sed \
-        -e "s/sind(/__SIND(/g" \
-        -e "s/cosd(/__COSD(/g" \
-        -e "s/tand(/__TAND(/g" \
-        -e "s/asind(/__ASIND(/g" \
-        -e "s/acosd(/__ACOSD(/g" \
-        -e "s/atand(/__ATAND(/g")"
+        -e "s/\bsind(/__SIND(/gI" \
+        -e "s/\bcosd(/__COSD(/gI" \
+        -e "s/\btand(/__TAND(/gI" \
+        -e "s/\basind(/__ASIND(/gI" \
+        -e "s/\bacosd(/__ACOSD(/gI" \
+        -e "s/\batand(/__ATAND(/gI")"
     # Expand degree-family placeholders (awk will see these as normal FN names)
     # We map them to awk FN tokens via the FN handler in awk below.
     # Restore names so awk can identify them:
@@ -223,14 +218,7 @@ EOF
     local _smart_hint=""
     # Extract first trig call argument for heuristic check
     local _trig_match
-    # Portable: POSIX sed instead of GNU grep -P (absent on macOS/BSD).
-    _trig_match="$(echo "$_hint_expr" | sed -n 's/.*[Ss][Ii][Nn](\([^)]*\).*/\1/p' | head -1)"
-    if [[ -z "$_trig_match" ]]; then
-        _trig_match="$(echo "$_hint_expr" | sed -n 's/.*[Cc][Oo][Ss](\([^)]*\).*/\1/p' | head -1)"
-    fi
-    if [[ -z "$_trig_match" ]]; then
-        _trig_match="$(echo "$_hint_expr" | sed -n 's/.*[Tt][Aa][Nn](\([^)]*\).*/\1/p' | head -1)"
-    fi
+    _trig_match="$(echo "$_hint_expr" | grep -oP '(?<=\b(?:sin|cos|tan)\()[^)]+' | head -1 2>/dev/null || true)"
     if [[ -n "$_trig_match" ]]; then
         # Evaluate the argument numerically to check if > 2*pi
         local _ang
@@ -526,5 +514,392 @@ bc_()   { mth "$@"; }
 math()  { mth "$@"; }
 calc()  { mth "$@"; }
 
-# ── Vendored from ~/ssot/shared/personal/maths.sh (mth only, no slv)
-#    Original: https://github.com/joece035/maths-helper
+# ── Standalone Dependency Helper (Zero SSOT requirement) ────
+_maths_helper_ensure_python() {
+    if command -v python3 >/dev/null 2>&1; then
+        PYTHON_CMD="python3"
+    elif command -v python >/dev/null 2>&1 && python -c 'import sys; sys.exit(0 if sys.version_info[0]>=3 else 1)' 2>/dev/null; then
+        PYTHON_CMD="python"
+    else
+        echo "slv: python3 is required. Attempting installation..." >&2
+        if command -v apt-get >/dev/null 2>&1; then
+            if [[ $EUID -eq 0 ]]; then
+                apt-get update -qq && apt-get install -y python3 python3-pip python3-sympy
+            elif command -v sudo >/dev/null 2>&1; then
+                sudo apt-get update -qq && sudo apt-get install -y python3 python3-pip python3-sympy
+            fi
+        elif command -v pkg >/dev/null 2>&1; then
+            pkg install -y python python-pip python-sympy
+        elif command -v brew >/dev/null 2>&1; then
+            brew install python
+        else
+            echo "slv: error: please install Python 3 manually." >&2
+            return 1
+        fi
+        PYTHON_CMD="python3"
+    fi
+
+    # Ensure sympy is installed
+    if ! "$PYTHON_CMD" -c "import sympy" 2>/dev/null; then
+        echo "slv: sympy not found. Installing sympy..." >&2
+        if "$PYTHON_CMD" -m pip --version >/dev/null 2>&1; then
+            "$PYTHON_CMD" -m pip install --quiet sympy 2>/dev/null || \
+            "$PYTHON_CMD" -m pip install --quiet --break-system-packages sympy 2>/dev/null || true
+        elif command -v apt-get >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
+            sudo apt-get update -qq && sudo apt-get install -y python3-sympy
+        fi
+
+        if ! "$PYTHON_CMD" -c "import sympy" 2>/dev/null; then
+            echo "slv: failed to auto-install sympy. Please run: pip install sympy" >&2
+            return 1
+        fi
+    fi
+    return 0
+}
+
+# ============================================================
+# slv — Algebraic Equation Solver (symbolic + numeric)
+#   (alias: solve — type whichever feels natural)
+# ============================================================
+slv() {
+    local -a clean_args=()
+    local deg_mode="0"
+    local raw_mode="0"
+    local scale="${MATH_DEFAULT_SCALE:-}"
+    local mode="${MATH_DEFAULT_MODE:-round}"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -d|--deg|--degree) deg_mode="1"; shift ;;
+            -q|--quiet|-r|--raw|--val|--value|--output-number) raw_mode="1"; shift ;;
+            -s|--scale) scale="$2"; shift 2 ;;
+            -s[0-9]*) scale="${1#-s}"; shift ;;
+            --scale=*) scale="${1#*=}"; shift ;;
+            -m|--mode) mode="$2"; shift 2 ;;
+            --mode=*) mode="${1#*=}"; shift ;;
+            --up|--roundup|--ceil) mode="up"; shift ;;
+            --down|--rounddown|--floor|--trunc) mode="down"; shift ;;
+            --round) mode="round"; shift ;;
+            *) clean_args+=("$1"); shift ;;
+        esac
+    done
+
+    # ── Normalize mode helper ──
+    _slv_norm_mode() {
+        case "$1" in
+            u|up|roundup|ceil)            echo "up" ;;
+            d|down|rounddown|floor|trunc) echo "down" ;;
+            r|round)                      echo "round" ;;
+            *)                            echo "$1" ;;
+        esac
+    }
+
+    # ── Lead-arg parsing: optional [scale] [mode] at the front ──
+    if [[ ${#clean_args[@]} -ge 2 ]] && [[ "${clean_args[0]}" =~ ^[0-9]+$ ]]; then
+        scale="${clean_args[0]}"
+        clean_args=("${clean_args[@]:1}")
+        if [[ ${#clean_args[@]} -ge 2 ]] && [[ "${clean_args[0]}" =~ ^(u|up|roundup|ceil|d|down|rounddown|floor|trunc|r|round)$ ]]; then
+            mode="$(_slv_norm_mode "${clean_args[0]}")"
+            clean_args=("${clean_args[@]:1}")
+        fi
+    fi
+
+    # ── Tail-arg parsing: optional [scale] [mode] at the end ──
+    local n=${#clean_args[@]}
+    if (( n >= 3 )) && [[ "${clean_args[n-1]}" =~ ^(u|up|roundup|ceil|d|down|rounddown|floor|trunc|r|round)$ ]] && [[ "${clean_args[n-2]}" =~ ^[0-9]+$ ]]; then
+        mode="$(_slv_norm_mode "${clean_args[n-1]}")"
+        scale="${clean_args[n-2]}"
+        clean_args=("${clean_args[@]:0:n-2}")
+    elif (( n >= 2 )) && [[ "${clean_args[n-1]}" =~ ^[0-9]+$ ]] && [[ "${clean_args[n-1]}" != *"="* ]]; then
+        scale="${clean_args[n-1]}"
+        clean_args=("${clean_args[@]:0:n-1}")
+    fi
+
+    [[ ${#clean_args[@]} -eq 0 ]] && {
+        cat <<'EOF' >&2
+slv — Algebraic Equation Solver (alias: solve)
+Usage: slv [--deg|-d] [-q|--raw] [-s <scale>] [-m <mode>] <equation> [var=value] ... [scale] [mode]
+
+Options:
+  -d, --deg, --degree                      Use degrees for trigonometric functions (default: radians)
+  -q, -r, --raw, --val, --output-number    Output raw numeric value only (script-friendly, no ANSI)
+  -s, --scale <digits>                     Number of decimal places (e.g. -s 4 or 20)
+  -m, --mode <r|u|d>                       Rounding mode: r/round (default), u/up, d/down
+
+Examples:
+  slv "x=2x+y" "y=2"                              # x=-2  y=2
+  slv -q "x=2x+y" "y=2"                           # -2
+  slv "basebet/bal=(m-1)/(m^n-1)" bal=100 m=2 n=5 4      # basebet = 3.2258
+  slv -q "basebet/bal=(m-1)/(m^n-1)" bal=100 m=2 n=5 20 d # 3.22580645161290322580
+  slv --raw "F=m*a" "m=10" "a=9.8"                # 98
+  slv --deg "h=a*sin(b)" a=10 b=30                # h=5   (sin(30°) = 0.5)
+  slv "2x=2y"                                     # x=y   (symbolic)
+  slv "a^2+b^2=c^2" "a=3" "b=4"                   # c=5
+EOF
+        return 1
+    }
+
+    local PYTHON_CMD="python3"
+    _maths_helper_ensure_python || return 1
+
+    local eq="${clean_args[0]}"
+    local -a knowns=("${clean_args[@]:1}")
+
+    "$PYTHON_CMD" - "$deg_mode" "$raw_mode" "$scale" "$mode" "$eq" "${knowns[@]}" <<'PYEOF'
+import sys, re
+from decimal import Decimal, ROUND_HALF_UP, ROUND_UP, ROUND_DOWN
+from sympy import (symbols, Eq, solve, simplify, sympify,
+                   sqrt, Rational, pi, E as euler, zoo, oo, nan,
+                   sin, cos, tan, asin, acos, atan, sinh, cosh, tanh,
+                   exp, log, Abs, factorial, floor, ceiling, I, rad, deg)
+from sympy.parsing.sympy_parser import (parse_expr,
+                   standard_transformations, implicit_multiplication_application,
+                   convert_xor)
+
+transformations = (standard_transformations +
+                   (implicit_multiplication_application, convert_xor))
+
+deg_mode  = (sys.argv[1] == "1")
+raw_mode  = (sys.argv[2] == "1")
+scale_str = sys.argv[3]
+mode_str  = sys.argv[4]
+eq_str    = sys.argv[5]
+knowns    = sys.argv[6:]
+
+MATH_FUNCS = {
+    "sqrt": sqrt, "pi": pi, "e": euler, "E": euler,
+    "sinh": sinh, "cosh": cosh, "tanh": tanh,
+    "exp": exp, "log": log, "ln": log,
+    "abs": Abs, "Abs": Abs,
+    "factorial": factorial, "floor": floor, "ceiling": ceiling,
+    "rad": rad, "deg": deg,
+    "sind": lambda x: sin(rad(x)),
+    "cosd": lambda x: cos(rad(x)),
+    "tand": lambda x: tan(rad(x)),
+    "asind": lambda x: deg(asin(x)),
+    "acosd": lambda x: deg(acos(x)),
+    "atand": lambda x: deg(atan(x)),
+}
+
+if deg_mode:
+    MATH_FUNCS.update({
+        "sin": lambda x: sin(rad(x)),
+        "cos": lambda x: cos(rad(x)),
+        "tan": lambda x: tan(rad(x)),
+        "asin": lambda x: deg(asin(x)),
+        "acos": lambda x: deg(acos(x)),
+        "atan": lambda x: deg(atan(x)),
+    })
+else:
+    MATH_FUNCS.update({
+        "sin": sin, "cos": cos, "tan": tan,
+        "asin": asin, "acos": acos, "atan": atan,
+    })
+
+BUILTINS = set(MATH_FUNCS.keys()) | {"int","mod","pow","min","max","sum","avg"}
+
+raw_vars_set = set(re.findall(r'[a-zA-Z_][a-zA-Z0-9_]*', eq_str))
+raw_vars_set = {v for v in raw_vars_set if v not in BUILTINS}
+
+for kv in knowns:
+    k = kv.split("=", 1)[0].strip()
+    if k and k not in BUILTINS:
+        raw_vars_set.add(k)
+
+raw_vars = sorted(raw_vars_set)
+sym_map = {v: symbols(v) for v in raw_vars}
+
+def parse(s):
+    ns = dict(MATH_FUNCS)
+    ns.update({str(v): v for v in sym_map.values()})
+    return parse_expr(s, local_dict=ns, transformations=transformations)
+
+subs = {}
+for kv in knowns:
+    if "=" not in kv:
+        print(f"slv: bad known value '{kv}' (need var=value)", file=sys.stderr)
+        sys.exit(1)
+    k, v = kv.split("=", 1)
+    k = k.strip(); v = v.strip()
+    if k in sym_map:
+        try:
+            subs[sym_map[k]] = parse(v)
+        except Exception:
+            subs[sym_map[k]] = sympify(v)
+
+if "=" not in eq_str:
+    print("slv: equation must contain '='", file=sys.stderr)
+    sys.exit(1)
+
+lhs_s, rhs_s = eq_str.split("=", 1)
+try:
+    lhs = parse(lhs_s.strip())
+    rhs = parse(rhs_s.strip())
+except Exception as exc:
+    print(f"slv: parse error — {exc}", file=sys.stderr)
+    sys.exit(1)
+
+equation = Eq(lhs, rhs)
+equation_subst = equation.subs(subs)
+
+if equation_subst.has(zoo) or lhs.subs(subs).has(zoo) or rhs.subs(subs).has(zoo):
+    if raw_mode:
+        sys.exit(1)
+    print("\n  \033[1;31mUndefined\033[0m (division by zero / singularity)\n")
+    sys.exit(0)
+
+unknowns = [sym_map[v] for v in raw_vars if sym_map[v] not in subs]
+
+if not unknowns:
+    val = simplify(lhs.subs(subs) - rhs.subs(subs))
+    if raw_mode:
+        print("1" if val == 0 else "0")
+        sys.exit(0)
+    if val == 0:
+        print("\n  \033[1;32m✓ Equation is satisfied (both sides equal).\033[0m\n")
+    else:
+        print(f"\n  \033[1;31m✗ Equation NOT satisfied (difference = {val}).\033[0m\n")
+    sys.exit(0)
+
+try:
+    sol = solve(equation_subst, unknowns, dict=True)
+except Exception as exc:
+    print(f"slv: solver error — {exc}", file=sys.stderr)
+    sys.exit(1)
+
+def fmt_val(v, use_scale=True):
+    try:
+        if v.is_number and v.is_real:
+            if use_scale and scale_str != "":
+                prec = int(scale_str)
+                eval_prec = max(60, prec + 30)
+                val_num = v.evalf(eval_prec)
+                d = Decimal(str(val_num))
+                if mode_str in ("up", "ceil", "u"):
+                    rounding = ROUND_UP
+                elif mode_str in ("down", "floor", "d", "trunc"):
+                    rounding = ROUND_DOWN
+                else:
+                    rounding = ROUND_HALF_UP
+                quant = Decimal("1e-" + str(prec)) if prec > 0 else Decimal("1")
+                return format(d.quantize(quant, rounding=rounding), 'f')
+            else:
+                f = float(v)
+                if f == int(f) and abs(f) < 1e15:
+                    return str(int(f))
+                if abs(f) > 1e10 or (f != 0 and abs(f) < 1e-4):
+                    return f"{f:.6g}"
+                return f"{f:.6g}"
+    except (TypeError, ValueError, AttributeError):
+        pass
+    return str(simplify(v))
+
+def _prefer_positive(solutions, unknowns, subs):
+    if len(solutions) <= 1:
+        return solutions[0] if solutions else {}
+    for candidate in solutions:
+        vals = [candidate.get(sym, sym).subs(subs) for sym in unknowns]
+        try:
+            if all(v.is_real and float(v) > 0 for v in vals):
+                return candidate
+        except (TypeError, ValueError, AttributeError):
+            pass
+    return solutions[0]
+
+if raw_mode:
+    if sol:
+        solution = _prefer_positive(sol, unknowns, subs)
+        for sym in unknowns:
+            val = solution.get(sym, sym)
+            val_sub = val.subs(subs)
+            if val_sub == sym and len(unknowns) > 1 and len(solution) < len(unknowns):
+                continue
+            print(fmt_val(val_sub, use_scale=True))
+    else:
+        expr = simplify(lhs - rhs)
+        for unk in unknowns:
+            try:
+                sym_sol = solve(expr.subs(subs), unk)
+                if sym_sol:
+                    print(fmt_val(sym_sol[0], use_scale=True))
+                    break
+            except Exception:
+                pass
+    sys.exit(0)
+
+ANSI_G  = "\033[1;32m"
+ANSI_C  = "\033[1;36m"
+ANSI_Y  = "\033[1;33m"
+ANSI_R  = "\033[0m"
+
+print()
+
+def _symbolic_solve(lhs, rhs, unknowns, subs):
+    expr = simplify(lhs - rhs)
+    printed_any = False
+    for unk in unknowns:
+        try:
+            sym_sol = solve(expr.subs(subs), unk)
+            if sym_sol:
+                chosen = sym_sol[0]
+                chosen_str = fmt_val(chosen, use_scale=True)
+                if str(chosen) != str(unk):
+                    note = f"  {ANSI_Y}(imaginary / no real solution){ANSI_R}" if chosen.has(I) else ""
+                    print(f"  {ANSI_G}{unk}{ANSI_R} = {ANSI_C}{chosen_str}{ANSI_R}{note}")
+                    printed_any = True
+                    break
+        except Exception:
+            pass
+    if not printed_any:
+        for unk in unknowns:
+            print(f"  {ANSI_G}{unk}{ANSI_R} = {ANSI_C}(no closed-form solution){ANSI_R}")
+
+if sol:
+    solution = _prefer_positive(sol, unknowns, subs)
+    for sym in unknowns:
+        val = solution.get(sym, sym)
+        val_sub = val.subs(subs)
+        if val_sub == sym and len(unknowns) > 1 and len(solution) < len(unknowns):
+            continue
+        s_name = str(sym)
+        s_val  = fmt_val(val_sub, use_scale=True)
+        note   = f"  {ANSI_Y}(imaginary / no real solution){ANSI_R}" if val_sub.has(I) else ""
+        print(f"  {ANSI_G}{s_name}{ANSI_R} = {ANSI_C}{s_val}{ANSI_R}{note}")
+    for sym, val in subs.items():
+        s_name = str(sym)
+        s_val  = fmt_val(val, use_scale=False)
+        print(f"  {ANSI_G}{s_name}{ANSI_R} = {ANSI_C}{s_val}{ANSI_R}")
+else:
+    _symbolic_solve(lhs, rhs, unknowns, subs)
+    for sym, val in subs.items():
+        print(f"  {ANSI_G}{sym}{ANSI_R} = {ANSI_C}{fmt_val(val, use_scale=False)}{ANSI_R}")
+print()
+PYEOF
+}
+
+solve() { slv "$@"; }
+
+# ── Direct Execution Dispatcher (when run directly as a script) ─
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    cmd_name="$(basename "$0")"
+    case "$cmd_name" in
+        mth|calc|math|bc_)
+            mth "$@"
+            ;;
+        slv|solve)
+            slv "$@"
+            ;;
+        *)
+            if [[ "$1" == "mth" || "$1" == "calc" || "$1" == "math" ]]; then
+                shift; mth "$@"
+            elif [[ "$1" == "slv" || "$1" == "solve" ]]; then
+                shift; slv "$@"
+            else
+                echo "Usage: $0 [mth|slv] <arguments...>" >&2
+                echo "Or source this file in your ~/.bashrc" >&2
+                exit 1
+            fi
+            ;;
+    esac
+fi
+#updated 2026-10-09 08:19:16
