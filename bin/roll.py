@@ -704,8 +704,9 @@ def run_simulation():
             r1 = f"{_wc('MODE')}   : {cn(39, 'CUSTOM', True)} ({active_bet_target.upper()} {'<' if active_bet_target=='low' else '>'} {t_val})"
             lines.append(pad_line(f"{l1}{' ' * max(2, 68 - visual_len(l1) - visual_len(r1))}{r1}"))
 
-            l2 = f"{_wc('ROLL')}  : {roll_c}  [{icon}]"
-            r2 = f"{_wc('STREAK')} : {loss_streak} (Max: {max_loss_streak})"
+            tag_wl = pos_c("[WIN ]") if result == "win" else neg_c("[LOSS]")
+            l2 = f" {tag_wl}"
+            r2 = f"{_wc('worst STREAK')} : {loss_streak} (Max: {max_loss_streak})"
             lines.append(pad_line(f"{l2}{' ' * max(2, 68 - visual_len(l2) - visual_len(r2))}{r2}"))
 
             lines.append("├" + "─" * 72 + "┤")
@@ -720,15 +721,7 @@ def run_simulation():
 
             zigzag_s = f"Step {zigzag_count}/{c_zigzag_every} ({active_bet_target.upper()})" if c_zigzag_every > 0 else "OFF"
             l5 = f"{_wc('ZIGZAG')}: {zigzag_s}"
-
-            if is_hunting_rare:
-                rare_hits_cnt = len(rare_hits_history)
-                rare_s = f"{rare_hits_cnt} Hit(s) 🎯" if rare_hits_cnt > 0 else "0 Hit"
-                r5 = f"{_wc('RARE HITS')}: {cn(226, rare_s, True)}"
-            else:
-                c_payout_val = (1.0 - (house_edge / 100.0)) / (custom_current_chance / 100.0)
-                r5 = f"{_wc('TARGET')}: {cn(39, f'{c_payout_val:.2f}x', True)} ({custom_current_chance:.2f}%)"
-
+            r5 = f"{_wc('WAGERED')}: {wagered:12.8f}"
             lines.append(pad_line(f"{l5}{' ' * max(2, 68 - visual_len(l5) - visual_len(r5))}{r5}"))
             lines.append("└" + "─" * 72 + "┘")
 
@@ -1020,18 +1013,24 @@ def run_simulation():
             ])
             csv_fp.flush()
 
-            # Milestone Event Feed Emits (Strictly <= 74 chars, no Balance, matching block)
+            # Bet History Feed Emits (Strictly <= 74 chars: Round, Roll Result, Bet Amount, Win/Lose Amount)
             if rare_hit_tag:
-                print_milestone(cn(226, f"  [EVENT #{round_num:>4d}] 🎯 {rare_hit_tag:<5s}│ Roll: {last_roll:>4d} │ Bet: {current_bet:>12.8f} │ Payout: {rare_hit_tag:>7s}", True))
-            elif game_mode in (1, 4, 5) and result == "win":
-                print_milestone(pos_c(f"  [EVENT #{round_num:>4d}] 🏆 WIN  │ Roll: {last_roll:>4d} │ Bet: {current_bet:>12.8f} │ Payout: {round_payout:>6.2f}x"))
-            elif game_mode == 2 and wager_target > 0:
+                win_s = f"+{win_amount:.8f}"
+                print_milestone(cn(226, f"  [#{round_num:>6d}] 🎯 {rare_hit_tag:<4s} │ Roll: {last_roll:>4d} │ Bet: {current_bet:>12.8f} │ Win:  {win_s:>13s}", True))
+            elif result == "win":
+                win_s = f"+{win_amount:.8f}"
+                print_milestone(pos_c(f"  [#{round_num:>6d}] 🏆 WIN  │ Roll: {last_roll:>4d} │ Bet: {current_bet:>12.8f} │ Win:  {win_s:>13s}"))
+            else:
+                loss_s = f"-{current_bet:.8f}"
+                print_milestone(neg_c(f"  [#{round_num:>6d}] 💀 LOSS │ Roll: {last_roll:>4d} │ Bet: {current_bet:>12.8f} │ Lose: {loss_s:>13s}"))
+
+            if game_mode == 2 and wager_target > 0:
                 current_wager_pct = int((wagered / wager_target) * 100)
                 if current_wager_pct >= last_wager_milestone + 25:
                     last_wager_milestone = (current_wager_pct // 25) * 25
-                    print_milestone(cn(141, f"  [MILESTONE #{round_num:>4d}] 🏁 Wager reached {last_wager_milestone}% ({wagered:.2f} / {wager_target:.2f})", True))
+                    print_milestone(cn(141, f"  [MILESTONE #{round_num:>6d}] 🏁 Wager reached {last_wager_milestone}% ({wagered:.2f} / {wager_target:.2f})", True))
             elif loss_streak > 0 and loss_streak % 25 == 0:
-                print_milestone(cn(208, f"  [ALERT #{round_num:>4d}] ⚠️  Streak Alert: {loss_streak} consecutive losses", True))
+                print_milestone(cn(208, f"  [ALERT #{round_num:>6d}] ⚠️  Streak Alert: {loss_streak} consecutive losses", True))
 
             # Update Live HUD
             render_hud(round_num, last_roll, result, current_bet, round_mode, win_amount)
