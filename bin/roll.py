@@ -74,6 +74,14 @@ def pad_line(content: str, target_width: int = 70) -> str:
     pad = max(0, target_width - v_len)
     return f"│ {content}{' ' * pad} │"
 
+def make_fixed_row(left: str, right: str, left_w: int = 34, total_w: int = 70) -> str:
+    """Compose a 2-column row with fixed column boundary to prevent layout jitter."""
+    l_v = visual_len(left)
+    l_pad = max(0, left_w - l_v)
+    r_v = visual_len(right)
+    r_pad = max(0, (total_w - left_w) - r_v)
+    return pad_line(f"{left}{' ' * l_pad}{right}{' ' * r_pad}", total_w)
+
 def make_header_border(title: str, total_width: int = 72) -> str:
     """Generate top border box with centered title."""
     t_len = visual_len(title)
@@ -366,6 +374,7 @@ def run_simulation():
     round_num = 0
     win_count = 0
     win_streak = 0
+    max_win_streak = 0
     lose_count = 0
     loss_streak = 0
     max_loss_streak = 0
@@ -698,31 +707,44 @@ def run_simulation():
         elif game_mode == 4:
             # Mode 4: CUSTOM MODE
             lines.append(make_header_border(cn(39, "CUSTOM HUNTER HUD", True)))
+            len_m = max(1, len(str(max_rounds)))
             r_pct = (r_num / max_rounds) * 100.0 if max_rounds > 0 else 0.0
-            l1 = f"{_wc('ROUND')} : {r_num} / {max_rounds} ({r_pct:.1f}%)"
-            t_val = int((100.0 - custom_current_chance) * 100) if active_bet_target == "high" else int(custom_current_chance * 100)
-            r1 = f"{_wc('MODE')}   : {cn(39, 'CUSTOM', True)} ({active_bet_target.upper()} {'<' if active_bet_target=='low' else '>'} {t_val})"
-            lines.append(pad_line(f"{l1}{' ' * max(2, 68 - visual_len(l1) - visual_len(r1))}{r1}"))
+            l1 = f"{_wc('ROUND')} : {r_num:>{len_m}} / {max_rounds} ({r_pct:5.1f}%)"
+            c_payout = (1.0 - (house_edge / 100.0)) / (custom_current_chance / 100.0)
+            payout_r = round(c_payout, 2)
+            c_payout_s = f"{int(payout_r)}x" if payout_r.is_integer() else f"{payout_r:.2f}x"
+            r1 = f"{_wc('MODE')}   : {cn(39, 'CUSTOM', True)} (BET:{active_bet_target.upper():<4} P:{c_payout_s:>4})"
+            lines.append(make_fixed_row(l1, r1, 34, 70))
 
+            cur_streak = win_streak if result == "win" else loss_streak
+            cur_streak_c = pos_c(f"{cur_streak:>5}") if result == "win" else neg_c(f"{cur_streak:>5}")
             tag_wl = pos_c("[WIN ]") if result == "win" else neg_c("[LOSS]")
-            l2 = f" {tag_wl}"
-            r2 = f"{_wc('worst STREAK')} : {loss_streak} (Max: {max_loss_streak})"
-            lines.append(pad_line(f"{l2}{' ' * max(2, 68 - visual_len(l2) - visual_len(r2))}{r2}"))
+            l2 = f" {tag_wl} {_wc('highest STREAK')}: {_wc('WIN')} {pos_c(f'{max_win_streak:>4}')}, {_wc('LOSS')} {neg_c(f'{max_loss_streak:>5}')} │ {_wc('current streak')}: {cur_streak_c}"
+            lines.append(pad_line(l2, 70))
 
             lines.append("├" + "─" * 72 + "┤")
 
-            l3 = f"{_wc('BET')}   : {bet:12.8f}"
-            r3 = f"{_wc('BALANCE')}: {bal_c}"
-            lines.append(pad_line(f"{l3}{' ' * max(2, 68 - visual_len(l3) - visual_len(r3))}{r3}"))
+            m4_bal_fmt = f"{balance:>15.8f}"
+            m4_bal_c = neg_c(m4_bal_fmt) if start_balance > balance else cn(28, m4_bal_fmt, True)
+            m4_pnl_c = pos_c(f"+{total_profit:>14.8f}") if total_profit > 0 else (neg_c(f"{total_profit:>15.8f}") if total_profit < 0 else _gr(f"{total_profit:>15.8f}"))
 
-            l4 = f"{_wc('PnL')}   : {round_pnl_c}"
-            r4 = f"{_wc('NET PnL')}: {pnl_c}"
-            lines.append(pad_line(f"{l4}{' ' * max(2, 68 - visual_len(l4) - visual_len(r4))}{r4}"))
+            l3 = f"{_wc('BET')}   : {bet:14.8f}"
+            r3 = f"{_wc('BALANCE')}: {m4_bal_c}"
+            lines.append(make_fixed_row(l3, r3, 34, 70))
 
-            zigzag_s = f"Step {zigzag_count}/{c_zigzag_every} ({active_bet_target.upper()})" if c_zigzag_every > 0 else "OFF"
-            l5 = f"{_wc('ZIGZAG')}: {zigzag_s}"
-            r5 = f"{_wc('WAGERED')}: {wagered:12.8f}"
-            lines.append(pad_line(f"{l5}{' ' * max(2, 68 - visual_len(l5) - visual_len(r5))}{r5}"))
+            chance_r = round(custom_current_chance, 2)
+            chance_s = f"{int(chance_r)}%" if chance_r.is_integer() else f"{chance_r:.2f}%"
+            l4 = f"{_wc('WINCHANCE')}: {chance_s:>5} , {_wc('Payout')}: {c_payout_s:>4}"
+            r4 = f"{_wc('NET PnL')}: {m4_pnl_c}"
+            lines.append(make_fixed_row(l4, r4, 34, 70))
+
+            if c_zigzag_every > 0:
+                zigzag_s = f"({active_bet_target.upper()} {zigzag_count}/{c_zigzag_every})"
+                l5 = f"{_wc('TARGET')}  : {active_bet_target.upper():<4} {zigzag_s}"
+            else:
+                l5 = f"{_wc('TARGET')}  : {active_bet_target.upper():<4}"
+            r5 = f"{_wc('WAGERED')}: {wagered:15.8f}"
+            lines.append(make_fixed_row(l5, r5, 34, 70))
             lines.append("└" + "─" * 72 + "┘")
 
         else:
@@ -820,6 +842,8 @@ def run_simulation():
                     total_profit = balance - start_balance
                     win_count += 1
                     win_streak += 1
+                    if win_streak > max_win_streak:
+                        max_win_streak = win_streak
                     loss_streak = 0
                     if brave_win_reset_base == 1:
                         nextbet = brave_base_bet
@@ -848,6 +872,8 @@ def run_simulation():
 
                     win_count += 1
                     win_streak += 1
+                    if win_streak > max_win_streak:
+                        max_win_streak = win_streak
                     loss_streak = 0
                     loss_value_streak = 0.0
                     win_value_streak += win_amount
@@ -943,6 +969,8 @@ def run_simulation():
                     loss_streak = 0
                     win_count += 1
                     win_streak += 1
+                    if win_streak > max_win_streak:
+                        max_win_streak = win_streak
                 else:
                     balance -= current_bet
                     nextbet = wager_base_bet
@@ -962,6 +990,8 @@ def run_simulation():
                     loss_streak = 0
                     win_count += 1
                     win_streak += 1
+                    if win_streak > max_win_streak:
+                        max_win_streak = win_streak
                 else:
                     balance -= current_bet
                     nextbet = current_bet * profit_lose_mul
@@ -1062,6 +1092,7 @@ def run_simulation():
             "wins": win_count,
             "losses": lose_count,
             "max_loss_streak": max_loss_streak,
+            "max_win_streak": max_win_streak,
             "start_balance": start_balance,
             "balance": balance,
             "profit_vault": profit_vault,
@@ -1100,7 +1131,8 @@ def run_simulation():
     print(cn(136, "=" * 74))
     print(
         f"  {_wc('Rounds')}: {round_num}  {pos_c('W')}: {win_count}  "
-        f"{neg_c('L')}: {lose_count}  {_wc('MaxStreak')}: {max_loss_streak}"
+        f"{neg_c('L')}: {lose_count}  {_wc('MaxLossStreak')}: {max_loss_streak}  "
+        f"{_wc('MaxWinStreak')}: {max_win_streak}"
     )
     print(f"  {_wc('Active Balance')}: {bal_c}")
     print(f"  {_wc('Profit Vault')}:   {vault_c}")
