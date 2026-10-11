@@ -22,9 +22,34 @@ import os
 from pathlib import Path
 import random
 import re
+import signal
 import sys
+import threading
 import time
 import unicodedata
+
+# ─── Graceful-stop flag ─────────────────────────────────────────────────────
+# Set to True by Ctrl+C or by typing 'q' + Enter.
+# The simulation loop checks this flag each round and exits cleanly.
+_user_stop: bool = False
+
+def _handle_sigint(sig, frame):
+    global _user_stop
+    _user_stop = True
+
+signal.signal(signal.SIGINT, _handle_sigint)
+
+def _stdin_watcher():
+    """Background thread: watch for 'q' or 'Q' on stdin (TTY only)."""
+    global _user_stop
+    try:
+        while not _user_stop:
+            line = sys.stdin.readline()
+            if line.strip().lower() == 'q':
+                _user_stop = True
+                break
+    except Exception:
+        pass
 
 # Windows consoles default to a legacy code page (cp1252/cp437) and raise
 # UnicodeEncodeError on the box-drawing and emoji used in the banners below.
@@ -804,6 +829,9 @@ def run_simulation():
             print(f" StopProfit: +{profit_stop_target:.8f} | WagerTarget: {wager_target:.2f} | LossTrigger: -{loss_trigger_pct:.1f}%")
         print(cn(136, "=" * 74))
 
+        # Show stop hint before entering the animation loop
+        print(cn(245, "  💡 กด Ctrl+C  หรือพิมพ์  q  แล้ว Enter  เพื่อหยุดและดูสรุปผล"))
+
         # Hide cursor during simulation for butter-smooth animation
         sys.stdout.write("\033[?25l")
         sys.stdout.flush()
@@ -811,9 +839,20 @@ def run_simulation():
     stop_reason = ""
     last_wager_milestone = 0
 
+    # Start stdin watcher only in interactive (non-quiet) TTY mode
+    global _user_stop
+    _user_stop = False
+    if not quiet and sys.stdin.isatty():
+        _watcher = threading.Thread(target=_stdin_watcher, daemon=True)
+        _watcher.start()
+
     try:
         # Main Loop
         while round_num < max_rounds:
+            if _user_stop:
+                stop_reason = "USER STOP: กด Ctrl+C หรือพิมพ์ q"
+                break
+
             if stop_on_win > 0 and win_count >= stop_on_win:
                 stop_reason = f"WIN LIMIT: reached {stop_on_win} wins"
                 break
@@ -1151,7 +1190,10 @@ def run_simulation():
         print(_gr("  Result: BREAK EVEN"))
 
     if stop_reason:
-        print(cn(45, f"  Stop Reason: {stop_reason}"))
+        if stop_reason.startswith("USER STOP"):
+            print(cn(226, f"  ⏹  {stop_reason}", True))
+        else:
+            print(cn(45, f"  Stop Reason: {stop_reason}"))
 
     print(cn(136, "=" * 74))
     print(f"  {pos_c('TOP 5 BIGGEST WINS')}")
