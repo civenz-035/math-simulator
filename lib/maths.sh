@@ -43,6 +43,35 @@
 # ============================================================
 
 mth() {
+    local _arg
+    for _arg in "$@"; do
+        if [[ "$_arg" == "-h" || "$_arg" == "--help" ]]; then
+            cat <<'EOF'
+mth — Excel-style Maths Helper (alias: calc, math)
+Usage: mth <expression> [decimals] [mode]
+       mode: r|round (default) | u|up | d|down
+Examples:
+  mth 10/3                 # 3.33
+  mth sqrt(5^2+10^2)       # 11.18
+  mth SUM(10,20,30)        # 60     (Excel-style: comma-separated)
+  mth POW(2,10)            # 1024
+  mth if(100>50,"y","n")   # y
+
+Trigonometry (Degree-friendly — Non-IT safe):
+  mth sind(30)             # 0.50   (sin ของ 30 องศา)
+  mth cosd(60)             # 0.50   (cos ของ 60 องศา)
+  mth tand(45)             # 1.00   (tan ของ 45 องศา)
+  mth asind(0.5)           # 30.00  (arc sin → ผลลัพธ์เป็นองศา)
+  mth "sin(30deg)"         # 0.50   (unit suffix syntax)
+  mth "cos(45°)"           # 0.71   (Unicode degree symbol)
+
+💡 TIP: sind/cosd/tand รับ-ส่งเป็นองศา ปลอดภัยสำหรับงานวิศวกรรม
+        sin/cos/tan แบบปกติใช้หน่วย Radian (สำหรับคนที่รู้อยู่แล้ว)
+EOF
+            return 0
+        fi
+    done
+
     [[ $# -eq 0 || -z "$*" ]] && {
         cat <<'EOF' >&2
 mth — Excel-style Maths Helper (alias: calc, math)
@@ -218,7 +247,8 @@ EOF
     local _smart_hint=""
     # Extract first trig call argument for heuristic check
     local _trig_match
-    _trig_match="$(echo "$_hint_expr" | grep -oP '(?<=\b(?:sin|cos|tan)\()[^)]+' | head -1 2>/dev/null || true)"
+    # POSIX-compatible extraction (no grep -P; works on BusyBox/ACodex)
+    _trig_match="$(echo "$_hint_expr" | sed -n 's/.*\b\(sin\|cos\|tan\)(\([^)]*\)).*/\2/p' | head -1 2>/dev/null || true)"
     if [[ -n "$_trig_match" ]]; then
         # Evaluate the argument numerically to check if > 2*pi
         local _ang
@@ -570,6 +600,30 @@ slv() {
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            -h|--help)
+                cat <<'EOF'
+slv — Algebraic Equation Solver (alias: solve)
+Usage: slv [--deg|-d] [-q|--raw] [-s <scale>] [-m <mode>] <equation> [var=value] ... [scale] [mode]
+
+Options:
+  -d, --deg, --degree                      Use degrees for trigonometric functions (default: radians)
+  -q, -r, --raw, --val, --output-number    Output raw numeric value only (script-friendly, no ANSI)
+  -s, --scale <digits>                     Number of decimal places (e.g. -s 4 or 20)
+  -m, --mode <r|u|d>                       Rounding mode: r/round (default), u/up, d/down
+  -h, --help                               Show this help message
+
+Examples:
+  slv "x=2x+y" "y=2"                              # x=-2  y=2
+  slv -q "x=2x+y" "y=2"                           # -2
+  slv "basebet/bal=(m-1)/(m^n-1)" bal=100 m=2 n=5 4      # basebet = 3.2258
+  slv -q "basebet/bal=(m-1)/(m^n-1)" bal=100 m=2 n=5 20 d # 3.22580645161290322580
+  slv --raw "F=m*a" "m=10" "a=9.8"                # 98
+  slv --deg "h=a*sin(b)" a=10 b=30                # h=5   (sin(30°) = 0.5)
+  slv "2x=2y"                                     # x=y   (symbolic)
+  slv "a^2+b^2=c^2" "a=3" "b=4"                   # c=5
+EOF
+                return 0
+                ;;
             -d|--deg|--degree) deg_mode="1"; shift ;;
             -q|--quiet|-r|--raw|--val|--value|--output-number) raw_mode="1"; shift ;;
             -s|--scale) scale="$2"; shift 2 ;;
@@ -890,16 +944,36 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
             slv "$@"
             ;;
         *)
-            if [[ "$1" == "mth" || "$1" == "calc" || "$1" == "math" ]]; then
+            if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+                cat <<'EOF'
+maths.sh — Excel-style Math Helper & Equation Solver
+Repository: https://github.com/civenz-035/maths-helper
+
+Usage: maths.sh <command> [options] [arguments...]
+       maths.sh -h | --help
+
+Commands:
+  mth, calc, math     Excel-style calculation (e.g. mth 10/3, mth sind(30))
+  slv, solve          Algebraic equation solver (e.g. slv "x=2x+y" "y=2")
+
+Options:
+  -h, --help          Show this help message
+
+Run '<command> -h' or '<command> --help' for command-specific options and examples.
+Or source this file in your ~/.bashrc
+EOF
+                exit 0
+            elif [[ "$1" == "mth" || "$1" == "calc" || "$1" == "math" ]]; then
                 shift; mth "$@"
             elif [[ "$1" == "slv" || "$1" == "solve" ]]; then
                 shift; slv "$@"
             else
                 echo "Usage: $0 [mth|slv] <arguments...>" >&2
+                echo "       $0 -h | --help" >&2
                 echo "Or source this file in your ~/.bashrc" >&2
                 exit 1
             fi
             ;;
     esac
 fi
-#updated 2026-10-09 10:02:58
+#updated 2026-10-14 06:52:14
