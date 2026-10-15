@@ -394,6 +394,12 @@ def run_simulation():
     # State variables
     balance = start_balance
     profit_vault = 0.0
+    # Keep full-session equity so the graph can use a meaningful round axis.
+    # Hybrid equity includes secured vault funds.
+    equity_history = [(0, balance + profit_vault)]
+    equity_graph_width = 54
+    equity_graph_bins: list[tuple[int, float] | None] = [None] * equity_graph_width
+    equity_graph_max_round = 0
     wagered = 0.0
     total_profit = 0.0
     round_num = 0
@@ -583,8 +589,124 @@ def run_simulation():
         sys.stdout.write(f"{msg}\n")
         sys.stdout.flush()
 
+    def _equity_display_max(round_n: int) -> int:
+        """Round the moving graph horizon up to the next 5,000-round mark."""
+        step = 5000
+        horizon = max(step, math.ceil(round_n / step) * step)
+        return min(max_rounds, horizon) if max_rounds > 0 else horizon
+
+    def _put_equity_in_bin(round_n: int, value: float, horizon: int) -> None:
+        x = min(equity_graph_width - 1, round_n * (equity_graph_width - 1) // max(1, horizon))
+        equity_graph_bins[x] = (round_n, value)
+
+    def record_equity_point(round_n: int, value: float) -> None:
+        """Keep session history and rebucket only when the display horizon grows."""
+        nonlocal equity_graph_bins, equity_graph_max_round
+        equity_history.append((round_n, value))
+        horizon = _equity_display_max(round_n)
+        if horizon != equity_graph_max_round:
+            equity_graph_bins = [None] * equity_graph_width
+            for point_round, point_value in equity_history:
+                _put_equity_in_bin(point_round, point_value, horizon)
+            equity_graph_max_round = horizon
+        else:
+            _put_equity_in_bin(round_n, value, horizon)
+
+    def render_equity_graph(r_num: int) -> list[str]:
+        """Render a full-session total-equity graph above the mode-specific HUD."""
+        graph_width = equity_graph_width
+        graph_height = 7
+        samples = [
+            (x, point) for x, point in enumerate(equity_graph_bins) if point is not None
+        ]
+        values = [point[1] for _, point in samples]
+        # Scale to the visible rolling window; the original bankroll should not
+        # flatten later windows after its round has scrolled off the graph.
+        low = min(values)
+        high = max(values)
+        baseline_visible = low <= start_balance <= high
+        if high == low:
+            padding = max(abs(start_balance) * 0.005, 0.01)
+        else:
+            padding = (high - low) * 0.08
+        low -= padding
+        high += padding
+        span = high - low or 1.0
+
+        def y_for(value: float) -> int:
+            scaled = (high - value) / span
+            return max(0, min(graph_height - 1, round(scaled * (graph_height - 1))))
+
+        grid = [[" " for _ in range(graph_width)] for _ in range(graph_height)]
+        if baseline_visible:
+            baseline_y = y_for(start_balance)
+            for x in range(graph_width):
+                grid[baseline_y][x] = "┄"
+
+        x_positions = [x for x, _ in samples]
+        y_positions = [y_for(value) for value in values]
+
+        for i in range(1, len(samples)):
+            x0, x1 = x_positions[i - 1], x_positions[i]
+            y0, y1 = y_positions[i - 1], y_positions[i]
+            if x1 <= x0:
+                continue
+            for x in range(x0, x1 + 1):
+                t = (x - x0) / (x1 - x0)
+                y = round(y0 + (y1 - y0) * t)
+                if y0 == y1:
+                    glyph = "─"
+                elif y1 > y0:
+                    glyph = "╲"
+                else:
+                    glyph = "╱"
+                grid[y][x] = glyph
+
+        for x, y in zip(x_positions, y_positions):
+            grid[y][x] = "·"
+        grid[y_positions[-1]][x_positions[-1]] = "●"
+
+        if game_mode == 1:
+            strategy = "M1 PROFIT · recovery"
+        elif game_mode == 2:
+            strategy = "M2 WAGER · volume"
+        elif game_mode == 3:
+            strategy = f"M3 HYBRID · {current_mode}"
+        elif game_mode == 4:
+            strategy = f"M4 CUSTOM · {active_bet_target.upper()}"
+        else:
+            strategy = "M5 BRAVE · survival"
+
+        equity_now = values[-1]
+        delta_pct = ((equity_now / start_balance) - 1.0) * 100.0 if start_balance else 0.0
+        title = _wc("LIVE TOTAL EQUITY")
+        header = make_header_border(title)
+        stats = f"{strategy}  EQUITY {equity_now:.6g}  Δ {delta_pct:+.5g}%"
+        lines = [header, pad_line(stats, 70)]
+
+        line_color = pos_c if equity_now >= start_balance else neg_c
+        ticks = (high, (high + low) / 2.0, low)
+        for row, tick in enumerate(ticks):
+            label = cn(242, f"{tick:>10.4g}")
+            plot = line_color("".join(grid[row]))
+            lines.append(pad_line(f"{label} │ {plot}", 70))
+
+        left_tick = "R 0"
+        current_tick = f"CURRENT R {r_num:,}"
+        right_tick = f"MAX ~ {equity_graph_max_round:,}"
+        dash_width = max(2, 70 - len(left_tick) - len(current_tick) - len(right_tick) - 2)
+        left_dashes = round(dash_width * min(1.0, r_num / max(1, equity_graph_max_round)))
+        right_dashes = dash_width - left_dashes
+        axis = f"{left_tick}{'─' * left_dashes} {current_tick} {'─' * right_dashes}{right_tick}"
+        lines.append(pad_line(axis, 70))
+        baseline_label = cn(242, '┄ start equity') if baseline_visible else cn(242, 'start equity outside range')
+        legend = f"{line_color('● equity')}  {baseline_label}  {r_num:,} rounds"
+        lines.append(pad_line(legend, 70))
+        lines.append("└" + "─" * 72 + "┘")
+        return lines
+
     def render_hud(r_num: int, roll: int, result: str, bet: float, mode_played: str, win_amt: float):
-        """Render the clean 8-line live HUD in-place."""
+        """Render the equity graph above the mode-specific HUD in-place."""
         nonlocal hud_rendered_lines
         if quiet:
             return
@@ -800,14 +922,17 @@ def run_simulation():
             lines.append(pad_line(f"{_wc('SURVIVAL')}    : {gauge_bar} {quota_msg}"))
             lines.append("└" + "─" * 72 + "┘")
 
-        # Reposition and render in-place
+        # Keep the common equity view above each mode's purpose-specific HUD.
+        rendered_lines = render_equity_graph(r_num) + lines
+
+        # Reposition and render both blocks in-place.
         if hud_rendered_lines > 0:
             sys.stdout.write(f"\033[{hud_rendered_lines}A")
 
-        for line in lines:
+        for line in rendered_lines:
             sys.stdout.write(f"\r\033[2K{line}\n")
         sys.stdout.flush()
-        hud_rendered_lines = len(lines)
+        hud_rendered_lines = len(rendered_lines)
 
     # Print Engine Header (skipped in web-lab headless mode)
     if not quiet:
@@ -1101,7 +1226,8 @@ def run_simulation():
             elif loss_streak > 0 and loss_streak % 25 == 0:
                 print_milestone(cn(208, f"  [ALERT #{round_num:>6d}] ⚠️  Streak Alert: {loss_streak} consecutive losses", True))
 
-            # Update Live HUD
+            # Update the shared equity series after hybrid vault transfers, then redraw.
+            record_equity_point(round_num, balance + profit_vault)
             render_hud(round_num, last_roll, result, current_bet, round_mode, win_amount)
 
             if round_delay > 0:

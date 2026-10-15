@@ -1,44 +1,38 @@
 #!/usr/bin/env bash
 echo "no need to install just check dependency"
 
-self_="$(dirname "$0")"
-deps_path="${self_}/check-deps.sh"
-alias_path="${self_}/lib/alias.sh"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+deps_path="${script_dir}/check-deps.sh"
+alias_path="${script_dir}/lib/alias.sh"
 
 # -- alias and deps check add to rcfiles
 rc_files=(".bashrc" ".zshrc")
-ins_rcf=""
+source_marker="# Added by simulator install script"
+quoted_alias_path="'${alias_path//\'/\'\\\'\'}'"
+source_line="[[ -f ${quoted_alias_path} ]] && source ${quoted_alias_path}"
 count=0
 
 for rc__ in "${rc_files[@]}"; do
-    rc_="$HOME/$rc__"
-    
-    # เช็คว่าไฟล์มีตัวตนอยู่จริงไหม (ไม่ว่าจะเป้นไฟล์จริงหรือ symlink)
-    if [[ -e "$rc_" ]]; then
-        # เก็บ path เต็มๆ ไว้เลย ไม่ต้องใช้ readlink 
-        # เพราะ cat >> จะวิ่งตาม symlink ไปเขียนที่ปลายทางให้อัตโนมัติครับ
-        ins_rcf+="$rc_\n"
-        (( count++ ))
+    rc_file="$HOME/$rc__"
+
+    # Ignore missing profiles; -e follows a valid symlink to its target.
+    [[ -e "$rc_file" ]] || continue
+    count=$((count + 1))
+
+    echo "กำลังตรวจสอบไฟล์ config: $rc_file"
+    if grep -Fq "$source_marker" "$rc_file" 2>/dev/null; then
+        echo "alias source already present in $rc_file"
+        continue
     fi
-done  
+
+    {
+        printf '\n%s\n' "$source_marker"
+        printf '%s\n' "$source_line"
+    } >> "$rc_file"
+    echo "เพิ่ม alias source ใน $rc_file แล้ว"
+done
 
 echo "$count source file found"
-
-# ใช้ Here-String (<<<) แทน Pipe เพื่อเลี่ยง Subshell issue และอ่านตัวแปร ins_rcf
-while IFS= read -r file; do
-    [[ -z "$file" ]] && continue
-    
-    echo "กำลังตรวจสอบและเพิ่ม config ใน: $file"
-    
-    # เพิ่มเครื่องหมายปิด quote ให้ครบถ้วน
-    cat >> "$file" << 'EOF'
-
-# Added by simulator install script
-[[ -f "$HOME/simulator/lib/alias.sh" ]] && source "$HOME/simulator/lib/alias.sh"
-EOF
-    
-    echo "done wrote in $file"
-done <<< "$ins_rcf"
 
 # รันสคริปต์เช็ค dependency ต่อ
 if [[ -f "$deps_path" ]]; then
