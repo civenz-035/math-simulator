@@ -40,8 +40,9 @@ d-start(){
 				#CUSTOM_BETS_PER_SEC=0.00
 				shift 3
 				;;
-			-h|--help)
-			
+		-h|--help)
+				d-start_help
+				;;
 			*) 
 				
 				break 
