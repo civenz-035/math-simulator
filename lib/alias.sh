@@ -40,16 +40,20 @@ d-start(){
 				#CUSTOM_BETS_PER_SEC=0.00
 				shift 3
 				;;
-		-h|--help)
-				d-start_help
-				return 0
-				;;
+		
 			*) 
 				
 				break 
 				;;
 	   esac
-	done	   
+	done
+	case "$1" in
+			-h|--help)
+				d-start_help
+				return 0
+				;;
+	esac
+	
 		d -py 		
 
 }
