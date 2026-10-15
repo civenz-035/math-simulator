@@ -7,6 +7,13 @@
 alias dpy='d -py'
 LOSEMUL=$(mth "1 + (1 / ($payout - 1)) + (0.05 / $payout)" 4 d)
 # -- custom flag 
+d-start_help(){
+	echo "usage: 
+	d-start 
+	-m4|--mode <basebet> <winchance> <losemul>
+	-m4--stop <stoop bal uper> <stop bal lower>
+	"
+}
 d-start(){
 	local cmd="dpy"
 
@@ -23,7 +30,7 @@ d-start(){
 				CUSTOM_LOSS_MUL="${4:-$LOSEMUL}"
 				shift 4
 			    ;;
-			-m4---upbal)
+			-m4---stop)
 			
 				CUSTOM_UPPER_LIMIT_BALANCE="${2:-15.00000000}"
 				CUSTOM_LOWER_LIMIT_BALANCE="${3:-0.00000000}"
@@ -33,6 +40,8 @@ d-start(){
 				#CUSTOM_BETS_PER_SEC=0.00
 				shift 3
 				;;
+			-h|--help)
+			
 			*) 
 				
 				break 
