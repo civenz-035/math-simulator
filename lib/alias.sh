@@ -42,7 +42,7 @@ d-start(){
 				;;
 		-h|--help)
 				d-start_help
-				break
+				return 0
 				;;
 			*) 
 				
