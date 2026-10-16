@@ -54,7 +54,7 @@ d-start(){
 				;;
 	esac
 	
-		d -py 		
+		d -py "$@"		
 
 }
 
