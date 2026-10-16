@@ -4,7 +4,6 @@
 # ------------------------------------------------------------
 
 
-alias dpy='d -py'
 LOSEMUL=$(mth "1 + (1 / ($payout - 1)) + (0.05 / $payout)" 4 d)
 # -- custom flag 
 d-start_help(){
@@ -58,3 +57,4 @@ d-start(){
 
 }
 
+alias dst='d-start'
