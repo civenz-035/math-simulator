@@ -20,20 +20,20 @@ d-start(){
 	while (( $# > 0 )); do
 		case "$1" in
 			-m4|--mode4) 
-				GAME_MODE='4'
-				# พื้นฐานของ Custom (ถ้าปล่อยว่าง จะใช้ GLOBAL_xxx)
-				CUSTOM_BASE_BET="${2:-0.01}"
-				CUSTOM_WIN_CHANCE="${3:-0.5}"
+			  export GAME_MODE='4'
+				# พื้นฐานของ Custom (ถ้าปล่อยว่าง จะใช้GLOBAL_xxx)
+				export CUSTOM_BASE_BET="${2:-0.01}"
+				export CUSTOM_WIN_CHANCE="${3:-0.5}"
 				#CUSTOM_BET_TARGET=high
 				
 				# Multiplier Settings (On Loss)
-				CUSTOM_LOSS_MUL="${4:-$LOSEMUL}"
+				export CUSTOM_LOSS_MUL="${4:-$LOSEMUL}"
 				shift 4
 			    ;;
-			-m4---stop)
+			-st|--stop)
 			
-				CUSTOM_UPPER_LIMIT_BALANCE="${2:-15.00000000}"
-				CUSTOM_LOWER_LIMIT_BALANCE="${3:-0.00000000}"
+				export CUSTOM_UPPER_LIMIT_BALANCE="${2:-15.00000000}"
+				export CUSTOM_LOWER_LIMIT_BALANCE="${3:-0.00000000}"
 				#CUSTOM_MIN_BET=0.00000000
 				#CUSTOM_MAX_BET=0.00000000
 				#CUSTOM_ZIGZAG_EVERY=0
