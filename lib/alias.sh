@@ -9,8 +9,9 @@ LOSEMUL=$(mth "1 + (1 / ($payout - 1)) + (0.05 / $payout)" 4 d)
 d-start_help(){
 	echo "usage: 
 	d-start 
-	-m4|--mode <basebet> <winchance> <losemul>
-	-m4--stop <stoop bal uper> <stop bal lower>
+	-g|--global <basebet> <winchance> <losemul>
+	-m|--mode <mode> 
+	-st --stop <stop loss>
 	"
 }
 d-start(){
@@ -18,27 +19,21 @@ d-start(){
 
 	while (( $# > 0 )); do
 		case "$1" in
-			-m4|--mode4) 
-			  export GAME_MODE='4'
-				# พื้นฐานของ Custom (ถ้าปล่อยว่าง จะใช้GLOBAL_xxx)
-				export CUSTOM_BASE_BET="${2:-0.01}"
-				export CUSTOM_WIN_CHANCE="${3:-0.5}"
-				#CUSTOM_BET_TARGET=high
-				
-				# Multiplier Settings (On Loss)
-				export CUSTOM_LOSS_MUL="${4:-$LOSEMUL}"
-				shift 4
+			-m|--mode) 
+			    export GAME_MODE="${2}"
+				shift 2
 			    ;;
 			-st|--stop)
-			
 				export CUSTOM_UPPER_LIMIT_BALANCE="${2:-15.00000000}"
 				export CUSTOM_LOWER_LIMIT_BALANCE="${3:-0.00000000}"
-				#CUSTOM_MIN_BET=0.00000000
-				#CUSTOM_MAX_BET=0.00000000
-				#CUSTOM_ZIGZAG_EVERY=0
-				#CUSTOM_BETS_PER_SEC=0.00
 				shift 3
 				;;
+			-g|--global)
+				export GLOBAL_BASE_BET="${2:-0.01}"
+				export GLOBAL_WIN_CHANCE="${3:-0.5}"
+				export GLOBAL_MULTI="${4:-1.006}"
+				shift 4
+				;;	
 		
 			*) 
 				
@@ -52,7 +47,6 @@ d-start(){
 				return 0
 				;;
 	esac
-	
 		d -py "$@"		
 
 }
