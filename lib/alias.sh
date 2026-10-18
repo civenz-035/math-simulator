@@ -9,9 +9,10 @@ LOSEMUL=$(mth "1 + (1 / ($payout - 1)) + (0.05 / $payout)" 4 d)
 d-start_help(){
 	echo "usage: 
 	d-start 
-	-g|--global <basebet> <winchance> <losemul>
+	-g|--global <start_balance> <basebet> <winchance> <losemul>
 	-m|--mode <mode> 
-	-st --stop <stop loss>
+	-st|--stop <upper_balance> <lower_balance>
+	-w|--wager <basebet> <bet_pct> <winchance>
 	"
 }
 d-start(){
@@ -23,16 +24,23 @@ d-start(){
 			    export GAME_MODE="${2}"
 				shift 2
 			    ;;
+			-w|--wager) 
+			    export WAGER_BASE_BET="${2}"
+				export WAGER_BET_PCT="${3}"
+				export WAGER_WIN_CHANCE="${4}"
+				shift 4
+			    ;;	
 			-st|--stop)
 				export CUSTOM_UPPER_LIMIT_BALANCE="${2:-15.00000000}"
 				export CUSTOM_LOWER_LIMIT_BALANCE="${3:-0.00000000}"
 				shift 3
 				;;
 			-g|--global)
-				export GLOBAL_BASE_BET="${2:-0.01}"
-				export GLOBAL_WIN_CHANCE="${3:-0.5}"
-				export GLOBAL_MULTI="${4:-1.006}"
-				shift 4
+				export START_BALANCE="${2:-5.00000000}"
+				export GLOBAL_BASE_BET="${3:-0.01}"
+				export GLOBAL_WIN_CHANCE="${4:-0.5}"
+				export GLOBAL_MULTI="${5:-1.006}"
+				shift 5
 				;;	
 		
 			*) 
