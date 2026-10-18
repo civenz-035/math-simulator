@@ -4,16 +4,18 @@
 # ------------------------------------------------------------
 
 
-LOSEMUL=$(mth "1 + (1 / ($payout - 1)) + (0.05 / $payout)" 4 d)
 # -- custom flag 
 d-start_help(){
 	echo "usage: 
 	d-start 
-	-g|--global <start_balance> <lose.mul>  <basebet> <winchance%>
-	-m|--mode <mode 1-5 > 
-	-st|--stop <upper_balance> <lower_balance>
-	-w|--wager <basebet> <bet_pct %> <winchance%>
+	-h|--help           แสดงวิธีใช้
+	-mc|--mode-conf <mode 1-5>
+	-wm|--wager-conf <basebet> <bet_pct %> <winchance%>
+	-st|--stop-conf <upper_balance> <lower_balance>
+	-gc|--global-conf <start_balance> <lose.mul> <basebet> <winchance%>
+	ระบุ flag เหล่านี้เป็นชุด ๆ ได้ แล้วส่งส่วนที่เหลือต่อให้ simulator
 	"
+	
 }
 d-start(){
 

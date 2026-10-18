@@ -15,6 +15,8 @@ Supports:
 ============================================================
 """
 
+from __future__ import annotations  # PEP 604 (X | None) annotations on Python 3.9 floor
+
 import argparse
 import csv
 import math
@@ -147,6 +149,34 @@ def load_env_config() -> dict[str, str]:
     for k, v in os.environ.items():
         if k in config or k.startswith("CUSTOM_") or k.startswith("BRAVE_") or k.startswith("GLOBAL_"):
             config[k] = v
+    # dice.env uses bash-style indirection (e.g. CUSTOM_LOSS_MUL="${GLOBAL_LOSS_MUL:-}").
+    # The bash engine sources the file and expands those refs; resolve the same
+    # way here against the merged config (file + process env), so flags that
+    # export GLOBAL_* (d-start) reach every engine, not just roll.sh.
+    # bash ${VAR:-} semantics: unresolved ref → empty → cfg_val treats as unset.
+    config = _expand_env_refs(config)
+    return config
+
+
+# Matches ${VAR}, ${VAR:-} and $VAR (the three forms used in dice.env)
+_ENV_REF_RE = re.compile(r"\$\{(\w+)(?::-)?\}|\$(\w+)")
+
+
+def _expand_env_refs(config: dict[str, str]) -> dict[str, str]:
+    for _ in range(5):  # chains like GLOBAL → CUSTOM → BRAVE resolve layer by layer
+        changed = False
+        for key in list(config):
+            val = config[key]
+            new_val = _ENV_REF_RE.sub(
+                lambda m: config.get(m.group(1) or m.group(2), "")
+                or os.environ.get(m.group(1) or m.group(2), ""),
+                val,
+            )
+            if new_val != val:
+                config[key] = new_val
+                changed = True
+        if not changed:
+            break
     return config
 
 # ─────────────────────────────────────────
