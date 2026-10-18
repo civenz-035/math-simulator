@@ -39,7 +39,7 @@ d-start(){
 				export START_BALANCE="${2:-5.00000000}"
 				export GLOBAL_BASE_BET="${3:-0.01}"
 				export GLOBAL_WIN_CHANCE="${4:-0.5}"
-				export GLOBAL_MULTI="${5:-1.006}"
+				export GLOBAL_MULTI="${5:-}"
 				shift 5
 				;;	
 		
