@@ -61,3 +61,13 @@ d-start(){
 }
 
 alias dst='d-start'
+
+# -- เมนูควบคุมแบบกดเลข (รู้ามาจากตำแหน่ง auto-resolve ทั้ง bash/zsh) --
+if [[ -n "${ZSH_VERSION:-}" ]]; then
+	_alias_sh="${(%):-%x}"
+else
+	_alias_sh="${BASH_SOURCE[0]:-$0}"
+fi
+_alias_sh_dir="$(cd -- "$(dirname -- "${_alias_sh}")" && pwd)"
+dmenu(){ "$_alias_sh_dir/../bin/menu.sh" "$@"; }
+alias dmn='dmenu'

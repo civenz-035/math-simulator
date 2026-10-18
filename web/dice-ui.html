@@ -142,6 +142,37 @@ table.rt td{text-align:right;padding:3px 6px;border-top:1px solid rgba(99,120,20
   #panel-theory.active{grid-template-columns:1fr 1fr}
   .kpis{grid-template-columns:repeat(3,1fr)}
 }
+/* ── responsive: จอเล็ก/แนวตั้ง — แผงกอดกันเป็นแนวตั้ง + เลื่อนอิสระ ไม่ทับกัน ── */
+@media(max-width:900px){
+  html,body{overflow:auto}             /* เปิดให้หน้าเลื่อนได้ ไม่งอกออกจาก 100dvh */
+  .app{height:auto;min-height:100dvh}
+  header{flex-wrap:wrap;row-gap:8px}
+  .hspace{display:none}
+  nav.tabs{overflow-x:auto;scrollbar-width:thin}
+  .tab{font-size:.76rem;padding:8px 6px}
+  .tab.long{white-space:normal;text-align:center}
+  main{min-height:none}
+  .panel{height:auto}
+  #panel-setup.active,#panel-lab.active,#panel-calc.active,#panel-theory.active{
+    display:flex;flex-direction:column}  /* stack แนวตั้งแทน grid บังคับ */
+  .col{max-height:none;overflow:visible}
+  #labResult{overflow:visible}
+  .kpis{grid-template-columns:repeat(2,1fr)}
+  .labbottom{display:flex;flex-direction:column;height:auto}
+  .minicol{max-height:40vh}
+  #equity{min-height:220px}
+  .frow{grid-template-columns:1fr}      /* ฟอร์มคู่แตกเป็นแนวตั้ง */
+}
+/* ── preset bar (3 พระโซน) ── */
+.presetbar{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,1fr);gap:10px;
+  margin-bottom:0;column-span:all}
+.presetcard{border:1.5px solid var(--border);border-radius:12px;background:var(--card);padding:11px 13px;
+  cursor:pointer;transition:.2s;display:flex;flex-direction:column;gap:4px}
+.presetcard:hover{border-color:var(--accent);background:rgba(107,140,255,.08)}
+.presetcard b{font-size:.8rem}
+.presetcard small{font-size:.68rem;color:var(--muted);line-height:1.5}
+.presetcard .ptag{font-family:var(--mono);font-size:.6rem;color:var(--muted);letter-spacing:.6px}
+@media(max-width:900px){.presetbar{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -165,6 +196,7 @@ table.rt td{text-align:right;padding:3px 6px;border-top:1px solid rgba(99,120,20
   <main>
     <!-- ═══ TAB 1: SETUP ═══ -->
     <section class="panel active" id="panel-setup">
+      <div class="presetbar" id="presetBar"></div>
       <div class="col" id="setupModes">
         <h3>🎯 โหมดจำลอง</h3>
         <div id="modeCards"></div>
@@ -435,6 +467,38 @@ async function updateStatus() {
   $('dot').classList.toggle('on', ok);
   $('srvTxt').textContent = ok ? 'Online ✓' : 'Offline — รัน dice-server.py';
 }
+/* ══ 3-พระโซน presets — ดึงจาก server (/presets → bin/presets.py ไฟล์เดียว) ══ */
+async function renderPresets() {
+  const bar = $('presetBar');
+  let list = null;
+  try {
+    const r = await fetch('/presets');
+    if (r.ok) list = await r.json();
+  } catch { /* server offline — ซ่อนแถบไป ไม่รบกวน */ }
+  if (!list) { bar.style.display = 'none'; return; }
+  bar.innerHTML = Object.entries(list).map(([tag, p]) => `
+    <div class="presetcard" data-tag="${tag}">
+      <b>${p.name}</b>
+      <small>${p.blurb}</small>
+      <span class="ptag">${Object.entries(p.keys).slice(0, 3).map(([k, v]) => `${k}=${v}`).join(' · ')} …</span>
+    </div>`).join('');
+  bar.querySelectorAll('.presetcard').forEach(c => c.addEventListener('click', () => applyPreset(c.dataset.tag)));
+}
+async function applyPreset(tag) {
+  try {
+    const r = await fetch('/presets');
+    if (!r.ok) throw new Error('คอนเก็ต presets ควรได้ค่า');
+    const list = await r.json();
+    const p = list[tag];
+    if (!p) throw new Error('ไม่พบ preset');
+    // บันทึกแค่ KEYS ของพรีเซตลง dice.env ตัวจริง — key อื่นที่พี่ปรับไว้ไม่โดนเปลี่ยน
+    const res = await fetch('/set', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p.keys) });
+    const j = await res.json();
+    if (!j.ok) throw new Error(j.error || 'save failed');
+    await loadConfig(true);
+    toast(`✅ ใช้ preset แล้ว: ${p.name} → สลับไปแท็บ 🧪 แล้วกด "▶ รันจำลอง"`);
+  } catch (e) { toast('❌ ' + e.message, 'err'); }
+}
 function collectCFG() {
   const d = { ...CFG };
   ALL_KEYS.forEach(k => {
@@ -673,7 +737,7 @@ $('btnSeed').addEventListener('click', () => $('labSeed').value = Math.floor(Mat
 $('btnCsv').addEventListener('click', () => window.open('/csv', '_blank'));
 $('btnCalc').addEventListener('click', () => solveCalc(false));
 $('btnCalcSave').addEventListener('click', () => solveCalc(true));
-(async () => { await updateStatus(); await loadConfig(true); drawChart(); })();
+(async () => { await updateStatus(); await loadConfig(true); await renderPresets(); drawChart(); })();
 setInterval(updateStatus, 30000);
 </script>
 </body>

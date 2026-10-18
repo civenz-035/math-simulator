@@ -13,6 +13,8 @@ Endpoints:
   GET  /csv        → downloads logs/dice_session_latest.csv
 """
 
+from __future__ import annotations  # PEP 604 (str | None) on the 3.9 floor
+
 import csv
 import json
 import math
@@ -40,6 +42,28 @@ UI_FILE = os.path.join(REPO_ROOT, "web", "dice-ui.html")
 ROLL_PY = os.path.join(REPO_ROOT, "bin", "roll.py")
 CSV_FILE = os.path.join(REPO_ROOT, "logs", "dice_session_latest.csv")
 PORT = int(os.environ.get("DICE_PORT", "7373"))
+
+CDN = False  # no external CDN anywhere; charts are hand-drawn on <canvas>
+
+
+def load_presets() -> dict:
+    """3-พระโซน presets — อ่านจาก bin/presets.py เท่านั้น (นิยามเดียว, SSOT)."""
+    global _PRESETS_CACHE
+    if _PRESETS_CACHE is None:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "dice_presets", os.path.join(REPO_ROOT, "bin", "presets.py")
+        )
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        _PRESETS_CACHE = {
+            tag: {"name": p["name"], "blurb": p["blurb"], "keys": p["keys"]}
+            for tag, p in m.PRESETS.items()
+        }
+    return _PRESETS_CACHE
+
+
+_PRESETS_CACHE = None
 
 MAX_ROUNDS = 200000
 RUN_TIMEOUT = 120
@@ -439,6 +463,8 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/get":
             data = parse_env(ENV_FILE)
             self._json(200, data)
+        elif self.path == "/presets":
+            self._json(200, load_presets())
         elif self.path == "/csv":
             self._serve_file(CSV_FILE, "dice_session_latest.csv")
         else:
