@@ -70,4 +70,4 @@ else
 fi
 _alias_sh_dir="$(cd -- "$(dirname -- "${_alias_sh}")" && pwd)"
 dmenu(){ "$_alias_sh_dir/../bin/menu.sh" "$@"; }
-alias dmn='dmenu'
+alias dmn='dmenu' alias dcfpc='micro $dtpc/dicebot5.35/simulator/config/dice.env'
