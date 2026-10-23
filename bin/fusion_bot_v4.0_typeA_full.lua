@@ -6,7 +6,7 @@
 ------------------------------------------------------------
 -- ⚙️ CONFIGURATION
 ------------------------------------------------------------
-main_mode = 1
+main_mode = 2
 
 ------------------------------------------------------------
 -- 🎯 WAGER MODE CONFIG
@@ -15,7 +15,7 @@ wager_chance            = 99
 wager_bet_percent       = 4.0
 loss_cut_percent        = 4.0
 recover_profit_percent  = 1
-wager_target            = 50.00
+wager_target            = 500
 enable_wager_target     = true
 
 ------------------------------------------------------------
