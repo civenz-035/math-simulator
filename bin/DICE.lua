@@ -7,7 +7,8 @@
 ------------------------------------------------------------
 
 main_mode = 1
-
+-- 1 = WAGER FOCUS + RECOVERY
+-- 2 = PROFIT FOCUS
 ------------------------------------------------------------
 -- 🎯 WAGER MODE CONFIG
 ------------------------------------------------------------
@@ -21,10 +22,10 @@ enable_wager_target     = true
 ------------------------------------------------------------
 -- 💹 PROFIT MODE CONFIG
 ------------------------------------------------------------
-auto_chance   = false
+auto_chance   = true
 chance_min    = 0.5       
 chance_max    = 0.75      
-chance_fixed  = 35
+chance_fixed  = 0.5
 random_on_win      = true     
 random_on_lose     = false    
 
@@ -33,7 +34,7 @@ random_on_lose     = false
 ------------------------------------------------------------
 risk_bonus_percent = 5.0       
 house_edge         = 1.0       
-allowed_losses     = 12       
+allowed_losses     = 600       
 constant_divisor   = 0         
 bethigh            = true      
 auto_switch        = true      
@@ -310,6 +311,18 @@ function dobet()
             end
             
             nextbet = base
+            
+            -- ✅ Bug#1 Fix: Check recovery on WIN too (not only on lose)
+            if main_mode == 1 then
+                local need_recover_amount = wager_loss_amount + (original_cycle_balance * recover_profit_percent / 100)
+                local current_gain = working_balance - profit_cycle_start
+                if current_gain >= need_recover_amount then
+                    print(string.format("✅ ฟื้นทุนครบ (on win) %.8f → กลับ Wager Mode", current_gain))
+                    separateProfitAndResetCycle()
+                    switchMode("wager")
+                    return
+                end
+            end
         end
         
         if auto_switch and switch_on_win then
