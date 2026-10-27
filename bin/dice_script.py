@@ -378,8 +378,8 @@ def CalculateBet():
     roll_result = float(PreviousBet.Roll)
     won_amount = float(PreviousBet.Profit) if Win else 0.0
     round_pnl = float(PreviousBet.Profit)
-    net_pnl = float(CurrentProfit)
     cur_bal = float(Balance)
+    net_pnl = _profit_vault + (cur_bal - _session_start_balance)
 
     if Win:
         _win_streak += 1

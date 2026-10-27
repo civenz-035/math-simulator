@@ -104,31 +104,66 @@ def _init_csv():
         logs_dir = os.path.dirname(_csv_path)
         if not os.path.exists(logs_dir):
             os.makedirs(logs_dir)
-        with open(_csv_path, "w") as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                "Round", "Mode", "Result", "Bet", "RoundPnL",
-                "NetPnL", "Balance", "LossStreak", "ProfitVault"
-            ])
+        try:
+            with open(_csv_path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    "Round", "Mode", "Result", "Roll", "Bet", "RoundPnL",
+                    "NetPnL", "Balance", "LossStreak", "ProfitVault",
+                    "ConsecutiveLosses"
+                ])
+        except TypeError:
+            with open(_csv_path, "w") as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    "Round", "Mode", "Result", "Roll", "Bet", "RoundPnL",
+                    "NetPnL", "Balance", "LossStreak", "ProfitVault",
+                    "ConsecutiveLosses"
+                ])
     except Exception:
         pass
 
 
-def _log_csv(rnd, mode, result, bet, round_pnl, net_pnl, bal, streak, vault):
+def _log_csv(*args):
     if not _csv_path:
         return
     try:
-        with open(_csv_path, "a") as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                rnd, mode, result,
-                "{0:.8f}".format(bet),
-                "{0:.8f}".format(round_pnl),
-                "{0:.8f}".format(net_pnl),
-                "{0:.8f}".format(bal),
-                streak,
-                "{0:.8f}".format(vault),
-            ])
+        if len(args) == 9:
+            rnd, mode, result, bet, round_pnl, net_pnl, bal, streak, vault = args
+            roll = 0.0
+            con_losses = 0
+        elif len(args) >= 10:
+            rnd = args[0]
+            mode = args[1]
+            result = args[2]
+            roll = args[3]
+            bet = args[4]
+            round_pnl = args[5]
+            net_pnl = args[6]
+            bal = args[7]
+            streak = args[8]
+            vault = args[9]
+            con_losses = args[10] if len(args) > 10 else 0
+        else:
+            return
+
+        row = [
+            rnd, mode, result,
+            "{0:.2f}".format(float(roll)),
+            "{0:.8f}".format(float(bet)),
+            "{0:.8f}".format(float(round_pnl)),
+            "{0:.8f}".format(float(net_pnl)),
+            "{0:.8f}".format(float(bal)),
+            streak,
+            "{0:.8f}".format(float(vault)),
+            con_losses,
+        ]
+        try:
+            with open(_csv_path, "a", newline="") as f:
+                csv.writer(f).writerow(row)
+        except TypeError:
+            with open(_csv_path, "a") as f:
+                csv.writer(f).writerow(row)
     except Exception:
         pass
 
@@ -472,8 +507,12 @@ def CalculateBet():
     _total_bets += 1
     bet_amt  = float(PreviousBet.TotalAmount)
     round_pnl = float(PreviousBet.Profit)
+    try:
+        roll_val = float(PreviousBet.Roll)
+    except Exception:
+        roll_val = 0.0
     cur_bal  = float(Balance)
-    net_pnl  = float(CurrentProfit)
+    net_pnl  = _profit_vault + (cur_bal - _original_cycle_balance)
     won      = bool(Win)
 
     _total_wagered += bet_amt
@@ -512,8 +551,8 @@ def CalculateBet():
                     Print("✅ Recovery WIN  gain={0:+.8f}".format(gain))
                     _separate_profit_reset()
                     _switch_to_wager()
-                    _log_csv(_total_bets, _mode, "win", bet_amt, round_pnl, net_pnl,
-                             cur_bal, _loss_streak, _profit_vault)
+                    _log_csv(_total_bets, "PROFIT", "win", roll_val, bet_amt, round_pnl, net_pnl,
+                             cur_bal, _loss_streak, _profit_vault, _consecutive_losses)
                     return
 
     # ── LOSE ─────────────────────────────────────────────────────────
@@ -570,8 +609,8 @@ def CalculateBet():
                     Print("✅ Recovery LOSE  gain={0:+.8f}".format(gain))
                     _separate_profit_reset()
                     _switch_to_wager()
-                    _log_csv(_total_bets, _mode, "lose", bet_amt, round_pnl, net_pnl,
-                             cur_bal, _loss_streak, _profit_vault)
+                    _log_csv(_total_bets, "PROFIT", "lose", roll_val, bet_amt, round_pnl, net_pnl,
+                             cur_bal, _loss_streak, _profit_vault, _consecutive_losses)
                     return
 
     # ── ENFORCE MIN BET ───────────────────────────────────────────────
@@ -610,7 +649,7 @@ def CalculateBet():
     # ── CSV LOG ───────────────────────────────────────────────────────
     total_pnl = _profit_vault + (cur_bal - _original_cycle_balance)
     _log_csv(_total_bets, _mode, "win" if won else "lose",
-             bet_amt, round_pnl, total_pnl, cur_bal, _loss_streak, _profit_vault)
+             roll_val, bet_amt, round_pnl, total_pnl, cur_bal, _loss_streak, _profit_vault, _consecutive_losses)
 
     # ── PERIODIC STATUS (every 50 bets) ──────────────────────────────
     if _total_bets % 50 == 0:

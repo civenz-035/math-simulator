@@ -178,6 +178,8 @@ def parse_args(cfg: dict[str, str]):
                    help="RNG seed for reproducible runs")
     p.add_argument("--quiet",   "-q", action="store_true",
                    help="Headless mode — emit __RESULT_JSON__ at end")
+    p.add_argument("--monitor", action="store_true",
+                   help="Launch Live ANSI HUD Monitor (tails Gambler.Bot CSV)")
     return p.parse_args()
 
 
@@ -416,6 +418,14 @@ def run_simulation():
 
     cfg  = load_env_config()
     args = parse_args(cfg)
+
+    if args.monitor:
+        try:
+            from fusion_live_hud import main as monitor_main
+        except ImportError:
+            from bin.fusion_live_hud import main as monitor_main
+        monitor_main()
+        return
 
     if args.seed is not None:
         random.seed(args.seed)
