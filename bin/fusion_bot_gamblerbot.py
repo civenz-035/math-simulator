@@ -21,7 +21,14 @@ import time
 # ==============================================================================
 _base_dir = os.path.dirname(__file__) if "__file__" in globals() else os.getcwd()
 
+_env_override = os.environ.get("FUSION_CONFIG") or os.environ.get("DICE_CONFIG")
+
 ENV_FILE_CANDIDATES = [
+    _env_override,
+    os.path.normpath(os.path.join(_base_dir, "..", "config", "fusion.env")),
+    os.path.normpath(os.path.join(_base_dir, "..", "simulator", "config", "fusion.env")),
+    os.path.normpath(os.path.join(_base_dir, "config", "fusion.env")),
+    r"c:\Users\User\simulator\config\fusion.env",
     os.path.normpath(os.path.join(_base_dir, "..", "config", "dice.env")),
     os.path.normpath(os.path.join(_base_dir, "..", "simulator", "config", "dice.env")),
     os.path.normpath(os.path.join(_base_dir, "config", "dice.env")),
@@ -34,21 +41,27 @@ def load_dice_env():
     cfg = {}
     found_path = None
     for p in ENV_FILE_CANDIDATES:
-        if os.path.isfile(p):
+        if p and os.path.isfile(p):
             found_path = p
             break
 
     if found_path:
+        lines = []
         try:
-            with open(found_path, "r") as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#") and "=" in line:
-                        k, v = line.split("=", 1)
-                        v = v.split("#", 1)[0].strip().strip("\"'")
-                        cfg[k.strip()] = v
-        except Exception:
-            pass
+            with open(found_path, "r", encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()
+        except (TypeError, ValueError, Exception):
+            try:
+                with open(found_path, "r") as f:
+                    lines = f.readlines()
+            except Exception:
+                pass
+        for line in lines:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                v = v.split("#", 1)[0].strip().strip("\"'")
+                cfg[k.strip()] = v
 
     # Expand ${VAR} references
     for _ in range(5):

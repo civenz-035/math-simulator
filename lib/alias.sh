@@ -45,7 +45,14 @@ d-start(){
 				shift 5
 				;;	
 		
-			*) 
+			-gc|--global-conf)
+				export START_BALANCE="$2";
+				export GLOBAL_LOSS_MUL="$3"
+				export GLOBAL_BASE_BET="$4";
+				export GLOBAL_WIN_CHANCE="$5";
+				shift 5
+				;;
+				*) 
 				break ;
 				;;
 	  esac
@@ -71,4 +78,15 @@ fi
 _alias_sh_dir="$(cd -- "$(dirname -- "${_alias_sh}")" && pwd)"
 dmenu(){ "$_alias_sh_dir/../bin/menu.sh" "$@"; }
 alias dmn='dmenu' 
-alias dcfpc='micro $simulator/config/dice.env'
+
+gameble(){
+
+	case "$1" in
+		-t|--test) 
+				py $sim/bin/fusion_bot.py
+				;;
+		-d|--dashboard)
+				py $sin/bin/fusion_live_hud.py
+				;;
+	esac				
+}

@@ -94,9 +94,11 @@ _ENV_REF_RE = re.compile(r"\$\{(\w+)(?::-)?\}|\$(\w+)")
 
 def load_env_config(repo_root: Path) -> dict[str, str]:
     cfg: dict[str, str] = {}
-    env_override = os.environ.get("DICE_CONFIG")
+    env_override = os.environ.get("FUSION_CONFIG") or os.environ.get("DICE_CONFIG")
     candidates = [
         Path(env_override) if env_override else None,
+        repo_root / "config" / "fusion.env",
+        repo_root / "fusion.env",
         repo_root / "config" / "dice.env",
         repo_root / "dice.env",
     ]
