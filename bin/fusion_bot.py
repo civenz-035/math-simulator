@@ -285,6 +285,17 @@ def solve_base_bet(
     base = cycle_bal / d if d > 0 else min_bet
     return max(base, min_bet), d
 
+def solve_dynamic_allowed_losses(chance_pct: float, risk_alpha: float = 0.001) -> int:
+    """Calculate maximum consecutive losses (N) allowed to keep streak ruin probability <= risk_alpha.
+    Formula: P(Lose N in a row) = q^N <= alpha  =>  N = ceil(ln(alpha) / ln(1 - p))
+    """
+    p = max(0.0001, min(0.9999, chance_pct / 100.0))
+    q = 1.0 - p
+    if q >= 1.0:
+        return 999
+    n = math.ceil(math.log(risk_alpha) / math.log(q))
+    return max(3, int(n))
+
 
 # ══════════════════════════════════════════════════════════════════
 # [4] ARGUMENT PARSER
@@ -442,10 +453,13 @@ def run_simulation():
     random_on_win       = cv("FUSION_RANDOM_ON_WIN",      1,     int) != 0
     random_on_lose      = cv("FUSION_RANDOM_ON_LOSE",     0,     int) != 0
 
-    risk_bonus_pct      = cv("FUSION_RISK_BONUS_PCT",     10.0,  float)
-    house_edge          = cv("HE",                        1.0,   float)
-    allowed_losses      = cv("FUSION_ALLOWED_LOSSES",     14,    int)
-    min_bet             = cv("FUSION_MIN_BET",            0.00000001, float)
+    risk_bonus_pct        = cv("FUSION_RISK_BONUS_PCT",     10.0,  float)
+    house_edge            = cv("HE",                        1.0,   float)
+    auto_cal_allowed_loss = cv("AUTO_CAL_ALLOWED_LOSS", cv("FUSION_AUTO_CAL_ALLOWED_LOSS", 1, int), int) != 0
+    risk_alpha            = cv("FUSION_RISK_ALPHA", cv("RISK_ALPHA", 0.001, float), float)
+    manual_allowed_losses = cv("FUSION_ALLOWED_LOSSES",     14,    int)
+    allowed_losses        = manual_allowed_losses
+    min_bet               = cv("FUSION_MIN_BET",            0.00000001, float)
     stop_profit_ratio   = cv("FUSION_STOP_PROFIT",        0.2,   float)
     stop_loss_ratio     = cv("FUSION_STOP_LOSS",          0.0,   float)
     stop_max_streak     = cv("FUSION_STOP_LOSS_STREAK",   0,     int)
@@ -525,9 +539,16 @@ def run_simulation():
         hud_rendered_lines = len(hud_lines)
 
     # ── HELPER FUNCTIONS ──────────────────────────────────────────
-    def update_base():
-        nonlocal base_bet, divisor
-        ref = chance_min if auto_chance else chance_fixed
+    def update_base(active_chance: float | None = None):
+        nonlocal base_bet, divisor, allowed_losses
+        if active_chance is not None:
+            ref = active_chance
+        else:
+            ref = chance_min if auto_chance else chance_fixed
+        if auto_cal_allowed_loss:
+            allowed_losses = solve_dynamic_allowed_losses(ref, risk_alpha)
+        else:
+            allowed_losses = manual_allowed_losses
         use_he = (main_mode == 2)
         base_bet, divisor = solve_base_bet(
             cycle_start_balance, ref, risk_bonus_pct,
@@ -572,19 +593,20 @@ def run_simulation():
         consecutive_losses = 0
         profit_cycle_start = balance
         cycle_start_balance = balance
-        update_base()
 
         if auto_chance:
             current_chance = random_chance(chance_min, chance_max)
         else:
             current_chance = chance_fixed
 
+        update_base(current_chance)
+
         mul, payout = get_payout_and_multiplier(
             current_chance, risk_bonus_pct, (main_mode == 2), house_edge
         )
         bethigh = True
         nextbet = max(base_bet, min_bet)
-        buffer_scroll(f"  {yel_c('🟡 → PROFIT MODE')} base={yel_c(f'{base_bet:.8f}')} chance={cya_c(f'{current_chance:.2f}%')} mul={mul:.4f}x")
+        buffer_scroll(f"  {yel_c('🟡 → PROFIT MODE')} base={yel_c(f'{base_bet:.8f}')} chance={cya_c(f'{current_chance:.2f}%')} N={allowed_losses} mul={mul:.4f}x")
 
     def roll_stake_dice(chance_pct: float, high: bool = True) -> tuple[float, bool, float]:
         """
@@ -623,7 +645,8 @@ def run_simulation():
         print(f"  Starting Bal   : {_wc(f'{session_start_balance:.8f}')}")
         print(f"  Loss Cut Pct   : {neg_c(f'{loss_cut_percent:.2f}%')}  │  Recover Pct: {yel_c(f'{recover_profit_pct:.2f}%')}")
         print(f"  Wager Target   : {cya_c(f'{wager_target:.2f}')} (Enabled: {enable_wager_target})")
-        print(f"  Allowed Losses : {_wc(str(allowed_losses))}  │  Stop Profit: {pos_c(f'{stop_profit_ratio*100:.1f}%')}")
+        loss_info = f"Auto (Risk {risk_alpha*100:.2f}%)" if auto_cal_allowed_loss else f"Fixed ({allowed_losses})"
+        print(f"  Allowed Losses : {_wc(loss_info)}  │  Stop Profit: {pos_c(f'{stop_profit_ratio*100:.1f}%')}")
         print(f"  Roll Delay     : {_wc(f'{round_delay}s')}  │  Max Rounds: {_wc(str(max_rounds))}")
         print(cn(240, "  💡 Press Ctrl+C or type 'q' + Enter at any time to stop"))
         print(cn(51, "═" * 74, True))
@@ -683,6 +706,7 @@ def run_simulation():
                 else:
                     current_chance = chance_fixed
 
+                update_base(current_chance)
                 nextbet = max(base_bet, min_bet)
 
                 # Mode 1 recovery check
@@ -730,7 +754,7 @@ def run_simulation():
 
                 if consecutive_losses >= allowed_losses:
                     buffer_scroll(f"  {ora_c('⛔')} {allowed_losses} losses reached → reset base bet")
-                    update_base()
+                    update_base(current_chance)
                     consecutive_losses = 0
                     nextbet = max(base_bet, min_bet)
 

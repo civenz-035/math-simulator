@@ -227,6 +227,14 @@ def _solve_base_bet(cycle_bal, chance_ref, bonus_pct, losses, min_bet, use_he, h
     base = cycle_bal / d if d > 0 else min_bet
     return max(base, min_bet), d
 
+def _solve_dynamic_allowed_losses(chance_pct, risk_alpha):
+    p = max(0.0001, min(0.9999, chance_pct / 100.0))
+    q = 1.0 - p
+    if q >= 1.0:
+        return 999
+    n = math.ceil(math.log(risk_alpha) / math.log(q))
+    return max(3, int(n))
+
 
 # ==============================================================================
 # [4] GLOBAL STATE
@@ -250,7 +258,10 @@ _random_on_win      = True
 _random_on_lose     = False
 _risk_bonus_pct     = 5.0
 _house_edge         = 1.0
-_allowed_losses     = 600
+_auto_cal_allowed_loss = True
+_risk_alpha         = 0.001
+_manual_allowed_losses = 14
+_allowed_losses     = 14
 _min_bet            = 0.00000001
 _stop_profit_ratio  = 0.2
 _stop_loss_ratio    = 0.0
@@ -285,9 +296,16 @@ _current_chance         = 98.0
 # ==============================================================================
 # [5] INTERNAL HELPERS
 # ==============================================================================
-def _update_base():
-    global _base_bet, _divisor, _cycle_start_balance
-    ref    = _chance_min if _auto_chance else _chance_fixed
+def _update_base(active_chance=None):
+    global _base_bet, _divisor, _cycle_start_balance, _allowed_losses
+    if active_chance is not None:
+        ref = active_chance
+    else:
+        ref = _chance_min if _auto_chance else _chance_fixed
+    if _auto_cal_allowed_loss:
+        _allowed_losses = _solve_dynamic_allowed_losses(ref, _risk_alpha)
+    else:
+        _allowed_losses = _manual_allowed_losses
     use_he = (_main_mode == 2)
     _base_bet, _divisor = _solve_base_bet(
         _cycle_start_balance, ref, _risk_bonus_pct,
@@ -348,12 +366,12 @@ def _switch_to_profit():
     _profit_cycle_start  = float(Balance)
     _cycle_start_balance = float(Balance)
 
-    _update_base()
-
     if _auto_chance:
         _current_chance = _random_chance(_chance_min, _chance_max)
     else:
         _current_chance = _chance_fixed
+
+    _update_base(_current_chance)
 
     mul, payout = _get_payout_and_multiplier(
         _current_chance, _risk_bonus_pct, (_main_mode == 2), _house_edge
@@ -455,7 +473,10 @@ def Reset():
     _random_on_lose      = gv("FUSION_RANDOM_ON_LOSE",   0,    int) != 0
     _risk_bonus_pct      = gv("FUSION_RISK_BONUS_PCT",   5.0,  float)
     _house_edge          = gv("HE",                      1.0,  float)
-    _allowed_losses      = gv("FUSION_ALLOWED_LOSSES",   600,  int)
+    _auto_cal_allowed_loss = gv("AUTO_CAL_ALLOWED_LOSS", gv("FUSION_AUTO_CAL_ALLOWED_LOSS", 1, int), int) != 0
+    _risk_alpha          = gv("FUSION_RISK_ALPHA",       gv("RISK_ALPHA", 0.001, float), float)
+    _manual_allowed_losses = gv("FUSION_ALLOWED_LOSSES", 14,   int)
+    _allowed_losses      = _manual_allowed_losses
     _min_bet             = gv("FUSION_MIN_BET",          0.00000001, float)
     _stop_profit_ratio   = gv("FUSION_STOP_PROFIT",      0.2,  float)
     _stop_loss_ratio     = gv("FUSION_STOP_LOSS",        0.0,  float)
@@ -554,6 +575,7 @@ def CalculateBet():
             else:
                 _current_chance = _chance_fixed
 
+            _update_base(_current_chance)
             NextBet.Chance = _current_chance
             NextBet.Amount = max(_base_bet, _min_bet)
 
@@ -611,7 +633,7 @@ def CalculateBet():
 
             if _consecutive_losses >= _allowed_losses:
                 Print("⛔ {0} losses → reset base".format(_allowed_losses))
-                _update_base()
+                _update_base(_current_chance)
                 _consecutive_losses = 0
                 NextBet.Amount = max(_base_bet, _min_bet)
 
