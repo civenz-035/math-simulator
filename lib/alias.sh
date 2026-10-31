@@ -90,3 +90,4 @@ gameble(){
 				;;
 	esac				
 }
+alias gbb='gameble' 
