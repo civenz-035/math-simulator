@@ -88,6 +88,9 @@ gameble(){
 		-d|--dashboard)
 				py $sin/bin/fusion_live_hud.py
 				;;
+		-c|--config)
+				micro "$sim/config/fusion.env"
+				;;		
 	esac				
 }
 alias gbb='gameble' 
