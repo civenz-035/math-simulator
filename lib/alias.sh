@@ -86,7 +86,7 @@ gameble(){
 				py $sim/bin/fusion_bot.py
 				;;
 		-d|--dashboard)
-				py $sin/bin/fusion_live_hud.py
+				py $sim/bin/fusion_live_hud.py
 				;;
 		-c|--config)
 				micro "$sim/config/fusion.env"
