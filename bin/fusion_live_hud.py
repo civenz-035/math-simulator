@@ -275,6 +275,9 @@ def main():
         balance: float,
         streak: int,
         vault: float,
+        chance: float = 0.0,
+        payout: float = 0.0,
+        loss_mul: float = 1.0,
     ):
         W = 70
 
@@ -307,6 +310,10 @@ def main():
         lines.append(col_row(
             f"📈 Wagered: {cya_c(f'{total_wagered:.4f}')}",
             f"ROI:     {pnl_c(f'{roi_pct:+.2f}%')}", 36, W
+        ))
+        lines.append(col_row(
+            f"🎯 Chance:  {cya_c(f'{chance:.2f}%')} │ Payout: {_wc(f'{payout:.4f}x')}",
+            f"Loss Mul: {yel_c(f'{loss_mul:.4f}x')}", 42, W
         ))
         lines.append(pad_line("─" * W, W))
 
@@ -431,8 +438,29 @@ def main():
                 streak = int(get_col("lossstreak", 8 if "roll" in header_map else 7, "0") or 0)
                 vault = float(get_col("profitvault", 9 if "roll" in header_map else 8, "0.0") or 0.0)
                 con_loss = int(get_col("consecutivelosses", 10, "0") or 0)
+                chance_val = float(get_col("chance", 11, "0.0") or 0.0)
+                payout_val = float(get_col("payout", 12, "0.0") or 0.0)
+                loss_mul_val = float(get_col("lossmul", 13, "0.0") or 0.0)
             except Exception:
                 continue
+
+            if chance_val <= 0:
+                if "WAGER" in mode_str.upper():
+                    chance_val = _gv(cfg, "FUSION_WAGER_CHANCE", 98.0, float)
+                    loss_mul_val = 1.0
+                else:
+                    chance_val = _gv(cfg, "FUSION_CHANCE_FIXED", 35.0, float)
+                    if _gv(cfg, "AUTO_CAL_LOSS_MUL", 1, int) != 0:
+                        risk_bonus = _gv(cfg, "FUSION_RISK_BONUS_PCT", 10.0, float)
+                        he = _gv(cfg, "HE", 1.0, float)
+                        p_win = max(0.0001, min(0.9999, chance_val / 100.0))
+                        mult = (1.0 - he / 100.0) / p_win
+                        loss_mul_val = 1.0 + (mult - 1.0) * (1.0 + risk_bonus / 100.0)
+                    else:
+                        loss_mul_val = _gv(cfg, "FUSION_MANUAL_LOSS_MUL", 1.05, float)
+            if payout_val <= 0 and chance_val > 0:
+                he = _gv(cfg, "HE", 1.0, float)
+                payout_val = (100.0 - he) / chance_val
 
             if r_num <= last_processed_round and last_processed_round > 0:
                 continue
@@ -471,7 +499,8 @@ def main():
 
             render_hud(
                 r_num, mode_str, res_str, roll_val, bet_amt,
-                round_pnl, net_pnl, balance, streak, vault
+                round_pnl, net_pnl, balance, streak, vault,
+                chance=chance_val, payout=payout_val, loss_mul=loss_mul_val
             )
 
     except KeyboardInterrupt:

@@ -207,7 +207,7 @@ def init_csv(path: Path) -> None:
             writer.writerow([
                 "Round", "Mode", "Result", "Roll", "Bet", "RoundPnL",
                 "NetPnL", "Balance", "LossStreak", "ProfitVault",
-                "ConsecutiveLosses"
+                "ConsecutiveLosses", "Chance", "Payout", "LossMul"
             ])
     except Exception:
         pass
@@ -215,7 +215,8 @@ def init_csv(path: Path) -> None:
 def log_csv_row(
     path: Path, rnd: int, mode: str, result: str, roll_val: float,
     bet_amt: float, round_pnl: float, net_pnl: float, bal: float,
-    streak: int, vault: float, con_losses: int
+    streak: int, vault: float, con_losses: int,
+    chance: float = 0.0, payout: float = 0.0, loss_mul: float = 0.0
 ) -> None:
     try:
         with open(path, "a", newline="", encoding="utf-8") as f:
@@ -229,6 +230,9 @@ def log_csv_row(
                 streak,
                 f"{vault:.8f}",
                 con_losses,
+                f"{chance:.2f}",
+                f"{payout:.4f}",
+                f"{loss_mul:.4f}",
             ])
     except OSError:
         pass
@@ -342,6 +346,8 @@ def parse_args(cfg: dict[str, str]):
                    help="Headless mode — emit __RESULT_JSON__ at end")
     p.add_argument("--monitor", action="store_true",
                    help="Launch Live ANSI HUD Monitor (tails Gambler.Bot CSV)")
+    p.add_argument("--vault", type=int, default=None,
+                   help="Vault mode: 1=Vault (skim profit), 0=Compound (use full balance). Overrides FUSION_ENABLE_VAULT env.")
     return p.parse_args()
 
 
@@ -353,7 +359,9 @@ def build_pinned_hud(
     rnd: int, max_rnd: int, mode: str, main_mode: int,
     balance: float, start_balance: float,
     profit_vault: float, total_profit: float,
+    enable_vault: bool = True,
     next_bet: float, next_chance: float,
+    next_payout: float = 0.0, next_loss_mul: float = 1.0,
     win_count: int, lose_count: int, loss_streak: int, max_loss_streak: int,
     total_wagered: float, wager_target: float,
     allowed_losses: int, consecutive_losses: int,
@@ -376,11 +384,16 @@ def build_pinned_hud(
         pad_line("─" * W, W),
         col_row(
             f"💰 Balance: {_wc(f'{balance:.8f}')}",
-            f"💎 Vault: {vault_c(f'{profit_vault:.8f}')}", 36, W
+            (f"💎 Vault: {vault_c(f'{profit_vault:.8f}')}" if enable_vault
+             else f"💎 Vault: {_gr('OFF (Compound)')}"), 36, W
         ),
         col_row(
             f"🎁 Net P/L: {pnl_c(f'{total_profit:+.8f}')} ({pnl_c(f'{total_profit/start_balance*100:+.2f}%')})",
-            f"🎲 Next:  {yel_c(f'{next_bet:.8f}')} ({next_chance:.1f}%)", 36, W
+            f"🎲 Next:  {yel_c(f'{next_bet:.8f}')}", 36, W
+        ),
+        col_row(
+            f"🎯 Chance:  {cya_c(f'{next_chance:.2f}%')} │ Payout: {_wc(f'{next_payout:.4f}x')}",
+            f"Loss Mul: {yel_c(f'{next_loss_mul:.4f}x')}", 42, W
         ),
         col_row(
             f"🏆 W/L: {pos_c(str(win_count))}/{neg_c(str(lose_count))} ({w_pct:.1f}%)",
@@ -483,6 +496,9 @@ def run_simulation():
     manual_allowed_losses = cv("FUSION_ALLOWED_LOSSES",     14,    int)
     allowed_losses        = manual_allowed_losses
     min_bet               = cv("FUSION_MIN_BET",            0.00000001, float)
+    # Vault vs Compound mode
+    _vault_env = cv("FUSION_ENABLE_VAULT", 1, int) != 0
+    enable_vault = _vault_env if args.vault is None else (args.vault != 0)
     stop_profit_ratio   = cv("FUSION_STOP_PROFIT",        0.2,   float)
     stop_loss_ratio     = cv("FUSION_STOP_LOSS",          0.0,   float)
     stop_max_streak     = cv("FUSION_STOP_LOSS_STREAK",   0,     int)
@@ -596,11 +612,18 @@ def run_simulation():
         nonlocal original_cycle_balance, balance
         cp = balance - original_cycle_balance
         if cp > 0:
-            profit_vault += cp
-            buffer_scroll(f"  {pos_c('✅ Cycle Complete!')} Profit: {pos_c(f'{cp:.8f}')} │ 💎 Vault: {pos_c(f'{profit_vault:.8f}')}")
-            balance = original_cycle_balance
-            working_balance = balance
-            cycle_start_balance = original_cycle_balance
+            if enable_vault:
+                profit_vault += cp
+                buffer_scroll(f"  {pos_c('✅ Cycle Complete!')} Profit: {pos_c(f'{cp:.8f}')} │ 💎 Vault: {pos_c(f'{profit_vault:.8f}')}")
+                balance = original_cycle_balance
+                working_balance = balance
+                cycle_start_balance = original_cycle_balance
+            else:
+                # Compound mode: keep full balance, update reference
+                original_cycle_balance = balance
+                cycle_start_balance = balance
+                working_balance = balance
+                buffer_scroll(f"  {pos_c('✅ Cycle Complete (Compound)!')} Profit: {pos_c(f'{cp:.8f}')} │ Balance: {pos_c(f'{balance:.8f}')}")
         else:
             buffer_scroll(f"  {yel_c('⚠️  Cycle ended without profit')} ({cp:.8f})")
             working_balance = balance
@@ -726,7 +749,7 @@ def run_simulation():
 
         balance += round_pnl
         working_balance = balance
-        net_pnl = profit_vault + (balance - original_cycle_balance)
+        net_pnl = (profit_vault + (balance - original_cycle_balance)) if enable_vault else (balance - session_start_balance)
 
         # ── WIN BRANCH ───────────────────────────────────────────
         if won:
@@ -825,7 +848,7 @@ def run_simulation():
             nextbet = min_bet
 
         # ── STOP RULES ───────────────────────────────────────────
-        total_pnl = profit_vault + (balance - original_cycle_balance)
+        total_pnl = (profit_vault + (balance - original_cycle_balance)) if enable_vault else (balance - session_start_balance)
         profit_ratio = total_pnl / session_start_balance if session_start_balance > 0 else 0.0
 
         if stop_profit_ratio > 0 and profit_ratio >= stop_profit_ratio:
@@ -850,10 +873,24 @@ def run_simulation():
             _user_stop = True
 
         # ── CSV LOGGING ──────────────────────────────────────────
+        cd_log = max(0.0001, min(0.9999, current_roll_chance / 100.0))
+        payout_log = (1.0 - house_edge / 100.0) / cd_log
+        if mode == "WAGER":
+            mul_log = 1.0
+        else:
+            use_he = (main_mode == 2)
+            if auto_cal_loss_mul:
+                mul_log, _ = get_payout_and_multiplier(
+                    current_roll_chance, risk_bonus_pct, use_he, house_edge
+                )
+            else:
+                mul_log = manual_loss_mul
+
         log_csv_row(
             csv_path, rnd, mode, "win" if won else "lose",
             roll_val, current_bet, round_pnl, total_pnl, balance,
-            loss_streak, profit_vault, consecutive_losses
+            loss_streak, profit_vault, consecutive_losses,
+            current_roll_chance, payout_log, mul_log
         )
 
         # ── ATOMIC DUAL-LAYER TUI FRAME (Zero Jitter / Zero Flicker)
@@ -878,17 +915,32 @@ def run_simulation():
             need_r = wager_loss_amount + original_cycle_balance * recover_profit_pct / 100.0
             gain_r = balance - profit_cycle_start
 
+            cd_next = max(0.0001, min(0.9999, current_chance / 100.0))
+            payout_next = (1.0 - house_edge / 100.0) / cd_next
+            if mode == "WAGER":
+                mul_next = 1.0
+            else:
+                use_he = (main_mode == 2)
+                if auto_cal_loss_mul:
+                    mul_next, _ = get_payout_and_multiplier(
+                        current_chance, risk_bonus_pct, use_he, house_edge
+                    )
+                else:
+                    mul_next = manual_loss_mul
+
             hud_box = build_pinned_hud(
                 rnd=rnd, max_rnd=max_rounds, mode=mode, main_mode=main_mode,
                 balance=balance, start_balance=session_start_balance,
                 profit_vault=profit_vault, total_profit=total_pnl,
                 next_bet=nextbet, next_chance=current_chance,
+                next_payout=payout_next, next_loss_mul=mul_next,
                 win_count=win_count, lose_count=lose_count,
                 loss_streak=loss_streak, max_loss_streak=max_loss_streak,
                 total_wagered=total_wagered, wager_target=wager_target,
                 allowed_losses=allowed_losses, consecutive_losses=consecutive_losses,
                 loss_cut_pct=loss_cut_percent, current_loss_pct=cur_lpct,
-                runtime=rt, recover_needed=need_r, current_gain=gain_r
+                runtime=rt, recover_needed=need_r, current_gain=gain_r,
+                enable_vault=enable_vault
             )
             render_frame(hud_box)
 
@@ -906,7 +958,7 @@ def run_simulation():
         sys.stdout.flush()
 
     runtime = time.time() - session_start_time
-    total_pnl_final = profit_vault + (balance - original_cycle_balance)
+    total_pnl_final = (profit_vault + (balance - original_cycle_balance)) if enable_vault else (balance - session_start_balance)
 
     if quiet:
         import json

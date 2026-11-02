@@ -123,7 +123,7 @@ def _init_csv():
                 writer.writerow([
                     "Round", "Mode", "Result", "Roll", "Bet", "RoundPnL",
                     "NetPnL", "Balance", "LossStreak", "ProfitVault",
-                    "ConsecutiveLosses"
+                    "ConsecutiveLosses", "Chance", "Payout", "LossMul"
                 ])
         except TypeError:
             with open(_csv_path, "w") as f:
@@ -131,7 +131,7 @@ def _init_csv():
                 writer.writerow([
                     "Round", "Mode", "Result", "Roll", "Bet", "RoundPnL",
                     "NetPnL", "Balance", "LossStreak", "ProfitVault",
-                    "ConsecutiveLosses"
+                    "ConsecutiveLosses", "Chance", "Payout", "LossMul"
                 ])
     except Exception:
         pass
@@ -145,6 +145,9 @@ def _log_csv(*args):
             rnd, mode, result, bet, round_pnl, net_pnl, bal, streak, vault = args
             roll = 0.0
             con_losses = 0
+            chance_val = 0.0
+            payout_val = 0.0
+            mul_val = 1.0
         elif len(args) >= 10:
             rnd = args[0]
             mode = args[1]
@@ -157,6 +160,9 @@ def _log_csv(*args):
             streak = args[8]
             vault = args[9]
             con_losses = args[10] if len(args) > 10 else 0
+            chance_val = args[11] if len(args) > 11 else 0.0
+            payout_val = args[12] if len(args) > 12 else 0.0
+            mul_val = args[13] if len(args) > 13 else 1.0
         else:
             return
 
@@ -170,6 +176,9 @@ def _log_csv(*args):
             streak,
             "{0:.8f}".format(float(vault)),
             con_losses,
+            "{0:.2f}".format(float(chance_val)),
+            "{0:.4f}".format(float(payout_val)),
+            "{0:.4f}".format(float(mul_val)),
         ]
         try:
             with open(_csv_path, "a", newline="") as f:
@@ -265,6 +274,7 @@ _env_path = None
 
 # ── Fusion config ──────────────────────────────────────────────────────────
 _main_mode          = 1       # 1=WAGER FOCUS+RECOVERY  2=PROFIT FOCUS
+_enable_vault       = True    # True=Skim & Reset to Vault, False=Compound all balance
 _auto_cal_base_bet  = True    # True=Auto calculate from Divisor, False=Manual
 _manual_base_bet    = 0.0001
 _auto_cal_loss_mul  = True    # True=Auto calculate from Chance+HE, False=Manual
@@ -353,23 +363,33 @@ def _update_base(active_chance=None):
 
 def _separate_profit_reset():
     global _profit_vault, _working_balance, _cycle_start_balance
-    global _original_cycle_balance
+    global _original_cycle_balance, _enable_vault
 
     cur_bal = float(Balance)
     cp = cur_bal - _original_cycle_balance
 
     if cp > 0:
-        _profit_vault += cp
-        Print("=" * 50)
-        Print("✅ Cycle Complete! Profit: {0:.8f}".format(cp))
-        Print("💎 Profit Vault: {0:.8f}".format(_profit_vault))
-        Print("🔄 Reset to: {0:.8f}".format(_original_cycle_balance))
-        Print("=" * 50)
-        # Type A: reset balance back (simulation — on real bot cannot change balance)
-        # We track working_balance as the "virtual" reset
-        _working_balance        = _original_cycle_balance
-        _cycle_start_balance    = _original_cycle_balance
-        _original_cycle_balance = cur_bal
+        if _enable_vault:
+            _profit_vault += cp
+            Print("=" * 50)
+            Print("✅ Cycle Complete! Profit: {0:.8f}".format(cp))
+            Print("💎 Profit Vault: {0:.8f}".format(_profit_vault))
+            Print("🔄 Reset to: {0:.8f}".format(_original_cycle_balance))
+            Print("=" * 50)
+            # Type A: reset balance back (simulation — on real bot cannot change balance)
+            # We track working_balance as the "virtual" reset
+            _working_balance        = _original_cycle_balance
+            _cycle_start_balance    = _original_cycle_balance
+            _original_cycle_balance = cur_bal
+        else:
+            Print("=" * 50)
+            Print("✅ Cycle Complete (Compound)! Profit: {0:.8f}".format(cp))
+            Print("💰 Total Balance: {0:.8f}".format(cur_bal))
+            Print("📈 Base Bet re-calculated from total balance")
+            Print("=" * 50)
+            _working_balance        = cur_bal
+            _cycle_start_balance    = cur_bal
+            _original_cycle_balance = cur_bal
     else:
         Print("⚠️  Cycle ended without profit ({0:.8f})".format(cp))
         _working_balance = cur_bal
@@ -440,7 +460,8 @@ def _show_status():
     else:
         cycle_pnl = bal - _profit_cycle_start
 
-    total_pnl = _profit_vault + (bal - _original_cycle_balance)
+    total_pnl = (_profit_vault + (bal - _original_cycle_balance)) if _enable_vault else (bal - _session_start_balance)
+    vault_str = "{0:.8f}".format(_profit_vault) if _enable_vault else "OFF (Compound)"
 
     Print("┌──────────────────────────────────────────────┐")
     Print("⏱  {0:.0f}s | Strategy: {1} | Mode: {2}".format(
@@ -449,13 +470,24 @@ def _show_status():
         _mode
     ))
     Print("💰 Balance:      {0:.8f}".format(bal))
-    Print("💎 Profit Vault: {0:.8f}".format(_profit_vault))
+    Print("💎 Profit Vault: {0}".format(vault_str))
     Print("📊 Cycle P/L:    {0:+.8f}".format(cycle_pnl))
     Print("🎁 Total P/L:    {0:+.8f}  ROI: {1:+.2f}%".format(
         total_pnl, total_pnl / _session_start_balance * 100 if _session_start_balance > 0 else 0.0
     ))
-    Print("🎲 Next Bet:     {0:.8f} | Chance: {1:.2f}%".format(
-        float(NextBet.Amount), float(NextBet.Chance)
+    cd_s = max(0.0001, min(0.9999, float(NextBet.Chance) / 100.0))
+    payout_s = (1.0 - _house_edge / 100.0) / cd_s
+    if _mode == "WAGER":
+        mul_s = 1.0
+    else:
+        use_he = (_main_mode == 2)
+        if _auto_cal_loss_mul:
+            mul_s, _ = _get_payout_and_multiplier(float(NextBet.Chance), _risk_bonus_pct, use_he, _house_edge)
+        else:
+            mul_s = _manual_loss_mul
+    Print("🎲 Next Bet:     {0:.8f}".format(float(NextBet.Amount)))
+    Print("🎯 Chance:       {0:.2f}% | Payout: {1:.4f}x | Loss Mul: {2:.4f}x".format(
+        float(NextBet.Chance), payout_s, mul_s
     ))
     Print("🏆 W/L: {0}/{1} | Streak: {2} (Max: {3})".format(
         _win_count, _lose_count, _loss_streak, _max_loss_streak
@@ -503,9 +535,10 @@ def Reset():
     def gv(key, default, cast=str):
         return _get_val(g, key, default, cast)
 
-    global _auto_cal_base_bet, _manual_base_bet, _auto_cal_loss_mul, _manual_loss_mul
+    global _enable_vault, _auto_cal_base_bet, _manual_base_bet, _auto_cal_loss_mul, _manual_loss_mul
     # ── Read FUSION_* keys (with GLOBAL_* fallback) ──
     _main_mode           = gv("FUSION_MAIN_MODE",        1,    int)
+    _enable_vault        = gv("FUSION_ENABLE_VAULT",     gv("ENABLE_VAULT", 1, int), int) != 0
     _auto_cal_base_bet   = gv("AUTO_CAL_BASE_BET",       1,    int) != 0
     _manual_base_bet     = gv("FUSION_MANUAL_BASE_BET",  gv("BASE_BET", 0.0001, float), float)
     _auto_cal_loss_mul   = gv("AUTO_CAL_LOSS_MUL",       1,    int) != 0
@@ -564,10 +597,11 @@ def Reset():
     base_desc = "Auto (Dynamic)" if _auto_cal_base_bet else "Manual ({0:.8f})".format(_manual_base_bet)
     mul_desc  = "Auto (+{0:.1f}%)".format(_risk_bonus_pct) if _auto_cal_loss_mul else "Manual ({0:.4f}x)".format(_manual_loss_mul)
     loss_desc = "Auto (Risk {0:.2f}%)".format(_risk_alpha * 100) if _auto_cal_allowed_loss else "Fixed ({0})".format(_allowed_losses)
+    vault_desc = "Enabled (Vault & Reset)" if _enable_vault else "Disabled (Compound All Bal)"
     Print("  Strategy: {0}".format(
         "WAGER FOCUS + RECOVERY" if _main_mode == 1 else "PROFIT FOCUS"
     ))
-    Print("  Balance:  {0:.8f}".format(_session_start_balance))
+    Print("  Balance:  {0:.8f} | Vault: {1}".format(_session_start_balance, vault_desc))
     Print("  Base Bet: {0} | Mul: {1}".format(base_desc, mul_desc))
     Print("  Loss Cut: {0:.2f}% | Recover: Loss + {1:.2f}%".format(
         _loss_cut_percent, _recover_profit_pct
@@ -601,7 +635,7 @@ def CalculateBet():
     except Exception:
         roll_val = 0.0
     cur_bal  = float(Balance)
-    net_pnl  = _profit_vault + (cur_bal - _original_cycle_balance)
+    net_pnl  = (_profit_vault + (cur_bal - _original_cycle_balance)) if _enable_vault else (cur_bal - _session_start_balance)
     won      = bool(Win)
 
     _total_wagered += bet_amt
@@ -725,7 +759,7 @@ def CalculateBet():
         NextBet.Amount = _min_bet
 
     # ── STOP RULES ───────────────────────────────────────────────────
-    total_pnl    = _profit_vault + (cur_bal - _original_cycle_balance)
+    total_pnl    = (_profit_vault + (cur_bal - _original_cycle_balance)) if _enable_vault else (cur_bal - _session_start_balance)
     profit_ratio = total_pnl / _session_start_balance if _session_start_balance > 0 else 0.0
 
     if _stop_profit_ratio > 0 and profit_ratio >= _stop_profit_ratio:
@@ -754,9 +788,20 @@ def CalculateBet():
         return
 
     # ── CSV LOG ───────────────────────────────────────────────────────
-    total_pnl = _profit_vault + (cur_bal - _original_cycle_balance)
+    total_pnl = (_profit_vault + (cur_bal - _original_cycle_balance)) if _enable_vault else (cur_bal - _session_start_balance)
+    cd_c = max(0.0001, min(0.9999, _current_chance / 100.0))
+    payout_c = (1.0 - _house_edge / 100.0) / cd_c
+    if _mode == "WAGER":
+        mul_c = 1.0
+    else:
+        use_he = (_main_mode == 2)
+        if _auto_cal_loss_mul:
+            mul_c, _ = _get_payout_and_multiplier(_current_chance, _risk_bonus_pct, use_he, _house_edge)
+        else:
+            mul_c = _manual_loss_mul
     _log_csv(_total_bets, _mode, "win" if won else "lose",
-             roll_val, bet_amt, round_pnl, total_pnl, cur_bal, _loss_streak, _profit_vault, _consecutive_losses)
+             roll_val, bet_amt, round_pnl, total_pnl, cur_bal, _loss_streak, _profit_vault, _consecutive_losses,
+             _current_chance, payout_c, mul_c)
 
     # ── PERIODIC STATUS (every 50 bets) ──────────────────────────────
     if _total_bets % 50 == 0:
