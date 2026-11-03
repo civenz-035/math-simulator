@@ -361,12 +361,6 @@ def _enforce_min_bet():
     """
     eff_min = _get_effective_min_bet()
     amt = float(NextBet.Amount)
-    try:
-        if "nextbet" in globals() and globals()["nextbet"] is not None:
-            amt = max(amt, float(globals()["nextbet"]))
-    except Exception:
-        pass
-
     if amt < eff_min:
         amt = eff_min
 
@@ -702,7 +696,7 @@ def CalculateBet():
         _consecutive_losses = 0
 
         if _mode == "WAGER":
-            NextBet.Amount = max(_wager_base_bet, _min_bet)
+            NextBet.Amount = max(_wager_base_bet, _get_effective_min_bet())
             NextBet.Chance = _wager_chance
 
             if _main_mode == 1 and _enable_wager_target and _total_wagered >= _wager_target:
@@ -720,7 +714,7 @@ def CalculateBet():
 
             _update_base(_current_chance)
             NextBet.Chance = _current_chance
-            NextBet.Amount = max(_base_bet, _min_bet)
+            NextBet.Amount = max(_base_bet, _get_effective_min_bet())
 
             if _main_mode == 1:
                 need = _wager_loss_amount + (_original_cycle_balance * _recover_profit_pct / 100.0)
@@ -767,7 +761,7 @@ def CalculateBet():
                 Print("⚠️  Loss cut {0:.2f}% | loss={1:.8f}".format(loss_pct, cycle_loss))
                 _switch_to_profit()
             else:
-                NextBet.Amount = max(_wager_base_bet, _min_bet)
+                NextBet.Amount = max(_wager_base_bet, _get_effective_min_bet())
                 NextBet.Chance = _wager_chance
 
         else:  # PROFIT mode lose
@@ -786,7 +780,7 @@ def CalculateBet():
             if new_bet > cur_bal:
                 new_bet = cur_bal * 0.9
 
-            NextBet.Amount = max(new_bet, _min_bet)
+            NextBet.Amount = max(new_bet, _get_effective_min_bet())
             NextBet.Chance = _current_chance
 
             Print("📈 Loss #{0} | Next: {1:.8f} (x{2:.4f})".format(
@@ -797,7 +791,7 @@ def CalculateBet():
                 Print("⛔ {0} losses → reset base".format(_allowed_losses))
                 _update_base(_current_chance)
                 _consecutive_losses = 0
-                NextBet.Amount = max(_base_bet, _min_bet)
+                NextBet.Amount = max(_base_bet, _get_effective_min_bet())
 
             if _main_mode == 1:
                 need = _wager_loss_amount + (_original_cycle_balance * _recover_profit_pct / 100.0)
