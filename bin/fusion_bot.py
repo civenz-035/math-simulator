@@ -606,6 +606,8 @@ def run_simulation():
         else:
             base_bet = max(manual_base_bet, min_bet)
             divisor = 1.0
+        if base_bet < min_bet:
+            base_bet = min_bet
 
     def separate_profit_reset():
         nonlocal profit_vault, working_balance, cycle_start_balance
@@ -637,7 +639,7 @@ def run_simulation():
         consecutive_losses = 0
         wager_cycle_start = balance
         if auto_cal_base_bet:
-            wager_base_bet = wager_cycle_start * (wager_bet_percent / 100.0)
+            wager_base_bet = max(wager_cycle_start * (wager_bet_percent / 100.0), min_bet)
         else:
             wager_base_bet = max(manual_base_bet, min_bet)
         wager_loss_amount = 0.0

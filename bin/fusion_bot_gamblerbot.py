@@ -331,6 +331,52 @@ _current_chance         = 98.0
 # ==============================================================================
 # [5] INTERNAL HELPERS
 # ==============================================================================
+def _get_effective_min_bet():
+    """
+    Single Source of Truth for minimum bet limit.
+    Takes the maximum of:
+      1. _min_bet from config (FUSION_MIN_BET)
+      2. Gambler.Bot built-in site 'minbet' (if present)
+      3. Gambler.Bot built-in site 'MinBet' (if present)
+    """
+    mb = float(_min_bet)
+    try:
+        if "minbet" in globals() and globals()["minbet"] is not None:
+            mb = max(mb, float(globals()["minbet"]))
+    except Exception:
+        pass
+    try:
+        if "MinBet" in globals() and globals()["MinBet"] is not None:
+            mb = max(mb, float(globals()["MinBet"]))
+    except Exception:
+        pass
+    return mb
+
+
+def _enforce_min_bet():
+    """
+    Rigorous Min Bet Enforcer:
+    If NextBet.Amount < minbet -> NextBet.Amount = minbet
+    Also synchronizes the 'nextbet' variable for complete Gambler.Bot compatibility.
+    """
+    eff_min = _get_effective_min_bet()
+    amt = float(NextBet.Amount)
+    try:
+        if "nextbet" in globals() and globals()["nextbet"] is not None:
+            amt = max(amt, float(globals()["nextbet"]))
+    except Exception:
+        pass
+
+    if amt < eff_min:
+        amt = eff_min
+
+    NextBet.Amount = amt
+    try:
+        globals()["nextbet"] = amt
+    except Exception:
+        pass
+    return amt
+
 def _update_base(active_chance=None):
     global _base_bet, _divisor, _cycle_start_balance, _allowed_losses
     if active_chance is not None:
@@ -351,14 +397,17 @@ def _update_base(active_chance=None):
     else:
         mul = _manual_loss_mul
 
-    # 3. Base Bet
+    # 3. Base Bet (strictly clamped to minbet)
+    eff_min = _get_effective_min_bet()
     if _auto_cal_base_bet:
         _base_bet, _divisor = _solve_base_bet_with_mul(
-            _cycle_start_balance, mul, _allowed_losses, _min_bet
+            _cycle_start_balance, mul, _allowed_losses, eff_min
         )
     else:
-        _base_bet = max(_manual_base_bet, _min_bet)
+        _base_bet = max(_manual_base_bet, eff_min)
         _divisor = 1.0
+    if _base_bet < eff_min:
+        _base_bet = eff_min
 
 
 def _separate_profit_reset():
@@ -403,16 +452,18 @@ def _switch_to_wager():
     _loss_streak      = 0
     _consecutive_losses = 0
     _wager_cycle_start  = float(Balance)
+    eff_min = _get_effective_min_bet()
     if _auto_cal_base_bet:
-        _wager_base_bet = _wager_cycle_start * (_wager_bet_percent / 100.0)
+        _wager_base_bet = max(_wager_cycle_start * (_wager_bet_percent / 100.0), eff_min)
     else:
-        _wager_base_bet = max(_manual_base_bet, _min_bet)
+        _wager_base_bet = max(_manual_base_bet, eff_min)
     _wager_loss_amount  = 0.0
     _current_chance     = _wager_chance
 
     NextBet.Chance = _wager_chance
-    NextBet.Amount = max(_wager_base_bet, _min_bet)
+    NextBet.Amount = max(_wager_base_bet, eff_min)
     NextBet.High   = True
+    _enforce_min_bet()
 
     Print("🟢 → WAGER MODE  base_bet={0:.8f}  chance={1:.2f}%".format(
         _wager_base_bet, _wager_chance))
@@ -443,9 +494,11 @@ def _switch_to_profit():
     else:
         mul = _manual_loss_mul
 
+    eff_min = _get_effective_min_bet()
     NextBet.Chance = _current_chance
-    NextBet.Amount = max(_base_bet, _min_bet)
+    NextBet.Amount = max(_base_bet, eff_min)
     NextBet.High   = True
+    _enforce_min_bet()
 
     Print("🟡 → PROFIT MODE  base={0:.8f}  chance={1:.2f}%  mul={2:.4f}x".format(
         _base_bet, _current_chance, mul))
@@ -618,6 +671,7 @@ def Reset():
         _switch_to_wager()
     else:
         _switch_to_profit()
+    _enforce_min_bet()
 
 
 def CalculateBet():
@@ -675,6 +729,7 @@ def CalculateBet():
                     Print("✅ Recovery WIN  gain={0:+.8f}".format(gain))
                     _separate_profit_reset()
                     _switch_to_wager()
+                    _enforce_min_bet()
                     _log_csv(_total_bets, "PROFIT", "win", roll_val, bet_amt, round_pnl, net_pnl,
                              cur_bal, _loss_streak, _profit_vault, _consecutive_losses)
                     return
@@ -687,8 +742,9 @@ def CalculateBet():
                     else:
                         _current_chance = _chance_fixed
                     _update_base(_current_chance)
-                    NextBet.Amount = max(_base_bet, _min_bet)
+                    NextBet.Amount = max(_base_bet, _get_effective_min_bet())
                     NextBet.Chance = _current_chance
+                    _enforce_min_bet()
                     _log_csv(_total_bets, "PROFIT", "win", roll_val, bet_amt, round_pnl, net_pnl,
                              cur_bal, _loss_streak, _profit_vault, _consecutive_losses)
                     return
@@ -750,13 +806,13 @@ def CalculateBet():
                     Print("✅ Recovery LOSE  gain={0:+.8f}".format(gain))
                     _separate_profit_reset()
                     _switch_to_wager()
+                    _enforce_min_bet()
                     _log_csv(_total_bets, "PROFIT", "lose", roll_val, bet_amt, round_pnl, net_pnl,
                              cur_bal, _loss_streak, _profit_vault, _consecutive_losses)
                     return
 
-    # ── ENFORCE MIN BET ───────────────────────────────────────────────
-    if float(NextBet.Amount) < _min_bet:
-        NextBet.Amount = _min_bet
+    # ── ENFORCE MIN BET (nextbet < minbet -> nextbet = minbet) ───────
+    _enforce_min_bet()
 
     # ── STOP RULES ───────────────────────────────────────────────────
     total_pnl    = (_profit_vault + (cur_bal - _original_cycle_balance)) if _enable_vault else (cur_bal - _session_start_balance)
