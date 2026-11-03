@@ -712,8 +712,9 @@ def run_simulation():
         base_desc = "Auto (Dynamic)" if auto_cal_base_bet else f"Manual ({manual_base_bet:.8f})"
         mul_desc = f"Auto (Bonus {risk_bonus_pct:.1f}%)" if auto_cal_loss_mul else f"Manual ({manual_loss_mul:.4f}x)"
         loss_info = f"Auto (Risk {risk_alpha*100:.2f}%)" if auto_cal_allowed_loss else f"Fixed ({allowed_losses})"
+        vault_desc = "Enabled (Vault & Reset)" if enable_vault else "Disabled (Compound All Bal)"
         print(f"  Strategy       : {pos_c('WAGER FOCUS + RECOVERY') if main_mode == 1 else yel_c('PROFIT FOCUS')}")
-        print(f"  Starting Bal   : {_wc(f'{session_start_balance:.8f}')}")
+        print(f"  Starting Bal   : {_wc(f'{session_start_balance:.8f}')}  │  Vault: {_wc(vault_desc)}")
         print(f"  Base Bet Mode  : {_wc(base_desc)}  │  Multiplier: {_wc(mul_desc)}")
         print(f"  Loss Cut Pct   : {neg_c(f'{loss_cut_percent:.2f}%')}  │  Recover Pct: {yel_c(f'{recover_profit_pct:.2f}%')}")
         print(f"  Allowed Losses : {_wc(loss_info)}  │  Stop Profit: {pos_c(f'{stop_profit_ratio*100:.1f}%')}")

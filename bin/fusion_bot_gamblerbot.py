@@ -704,6 +704,11 @@ def CalculateBet():
                 _separate_profit_reset()
                 _show_status()
                 Stop()
+                cd_c = max(0.0001, min(0.9999, _wager_chance / 100.0))
+                payout_c = (1.0 - _house_edge / 100.0) / cd_c
+                _log_csv(_total_bets, "WAGER", "win", roll_val, bet_amt, round_pnl, net_pnl,
+                         cur_bal, _loss_streak, _profit_vault, _consecutive_losses,
+                         _wager_chance, payout_c, 1.0)
                 return
 
         else:  # PROFIT mode win
@@ -724,23 +729,30 @@ def CalculateBet():
                     _separate_profit_reset()
                     _switch_to_wager()
                     _enforce_min_bet()
+                    cd_c = max(0.0001, min(0.9999, _current_chance / 100.0))
+                    payout_c = (1.0 - _house_edge / 100.0) / cd_c
                     _log_csv(_total_bets, "PROFIT", "win", roll_val, bet_amt, round_pnl, net_pnl,
-                             cur_bal, _loss_streak, _profit_vault, _consecutive_losses)
+                             cur_bal, _loss_streak, _profit_vault, _consecutive_losses,
+                             _current_chance, payout_c, 1.0)
                     return
             elif _main_mode == 2:
                 cp = cur_bal - _original_cycle_balance
                 if cp > 0:
                     _separate_profit_reset()
-                    if _auto_chance and _random_on_win:
-                        _current_chance = _random_chance(_chance_min, _chance_max)
-                    else:
-                        _current_chance = _chance_fixed
                     _update_base(_current_chance)
                     NextBet.Amount = max(_base_bet, _get_effective_min_bet())
                     NextBet.Chance = _current_chance
                     _enforce_min_bet()
+                    cd_c = max(0.0001, min(0.9999, _current_chance / 100.0))
+                    payout_c = (1.0 - _house_edge / 100.0) / cd_c
+                    use_he = (_main_mode == 2)
+                    if _auto_cal_loss_mul:
+                        mul_c, _ = _get_payout_and_multiplier(_current_chance, _risk_bonus_pct, use_he, _house_edge)
+                    else:
+                        mul_c = _manual_loss_mul
                     _log_csv(_total_bets, "PROFIT", "win", roll_val, bet_amt, round_pnl, net_pnl,
-                             cur_bal, _loss_streak, _profit_vault, _consecutive_losses)
+                             cur_bal, _loss_streak, _profit_vault, _consecutive_losses,
+                             _current_chance, payout_c, mul_c)
                     return
 
     # ── LOSE ─────────────────────────────────────────────────────────
@@ -801,8 +813,11 @@ def CalculateBet():
                     _separate_profit_reset()
                     _switch_to_wager()
                     _enforce_min_bet()
+                    cd_c = max(0.0001, min(0.9999, _current_chance / 100.0))
+                    payout_c = (1.0 - _house_edge / 100.0) / cd_c
                     _log_csv(_total_bets, "PROFIT", "lose", roll_val, bet_amt, round_pnl, net_pnl,
-                             cur_bal, _loss_streak, _profit_vault, _consecutive_losses)
+                             cur_bal, _loss_streak, _profit_vault, _consecutive_losses,
+                             _current_chance, payout_c, 1.0)
                     return
 
     # ── ENFORCE MIN BET (nextbet < minbet -> nextbet = minbet) ───────
@@ -831,7 +846,7 @@ def CalculateBet():
         Stop()
         return
 
-    if cur_bal < _min_bet * 2:
+    if cur_bal < _get_effective_min_bet() * 2:
         Print("🚨 Balance too low!")
         _show_status()
         Stop()
