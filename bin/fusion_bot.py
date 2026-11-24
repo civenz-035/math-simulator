@@ -387,6 +387,8 @@ def build_pinned_hud(
 
     round_pb = progress_bar(rnd, max_rnd, 14)
     w_pct = (win_count / rnd * 100.0) if rnd > 0 else 0.0
+    # In vault mode this is the virtual working balance, not the account total.
+    bal_label = "Working" if enable_vault else "Balance"
 
     # Exactly 11 lines in both modes (Rock Solid, Zero Height Jitter)
     lines: list[str] = [
@@ -394,7 +396,7 @@ def build_pinned_hud(
         col_row(f"⏱  {_wc(f'{runtime:.0f}s')} │ {strat_tag}", f"Mode: {mode_badge}", 42, W),
         pad_line("─" * W, W),
         col_row(
-            f"💰 Balance: {_wc(f'{balance:.8f}')}",
+            f"💰 {bal_label}: {_wc(f'{balance:.8f}')}",
             (f"💎 Vault: {vault_c(f'{profit_vault:.8f}')}" if enable_vault
              else f"💎 Vault: {_gr('OFF (Compound)')}"), 36, W
         ),
@@ -1003,8 +1005,11 @@ def run_simulation():
     print(f"  Strategy      : {pos_c('WAGER FOCUS+RECOVERY') if main_mode == 1 else yel_c('PROFIT FOCUS')}")
     print(f"  Total Rounds  : {_wc(f'{total_bets:,}')} / {max_rounds:,}")
     print(f"  Runtime       : {_wc(f'{runtime:.2f}s')} ({total_bets / max(0.001, runtime):.1f} rolls/sec)")
+    bal_label = "Working Bal" if enable_vault else "Final Balance"
     print(f"  Start Balance : {session_start_balance:14.8f}")
-    print(f"  Final Balance : {_wc(f'{balance:14.8f}')}")
+    print(f"  {bal_label:<13} : {_wc(f'{balance:14.8f}')}")
+    if enable_vault:
+        print(f"  {'Account Bal':<13} : {_wc(f'{balance + profit_vault:14.8f}')}")
     print(f"  Profit Vault  : {pos_c(f'{profit_vault:+14.8f}')}")
     print(f"  Net Total PnL : {pnl_color(f'{total_pnl_final:+14.8f}')} (ROI: {pnl_color(f'{roi_pct:+.2f}%')})")
     print(f"  Win / Loss    : {pos_c(str(win_count))} W  /  {neg_c(str(lose_count))} L  ({win_count / max(1, total_bets) * 100:.2f}%)")

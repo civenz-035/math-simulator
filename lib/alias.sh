@@ -82,7 +82,7 @@ alias dmn='dmenu'
 
 gameble(){
 	local py_cmd="python"
-	command -v python >/dev/null 2>&1 || py_cmd="py"
+	#command -v python >/dev/null 2>&1 || py_cmd="py"
 
 	case "$1" in
 		-chk|--check|status|--status)
@@ -110,10 +110,14 @@ gameble(){
 		*)
 				"$py_cmd" "$sim/bin/fusion_live_hud.py" "$@"
 				;;
-	esac				
+	esac
 }
 gbb(){ gameble "$@"; }
 gmm(){ gameble "$@"; }
-alias gbb='gameble' 
-alias gmm='gameble' 
+alias gbb='gameble'
+alias gmm='gameble'
+
+
+export stake="$sim/bin/fusion_native.py"
+export simulator="$sim/bin/fusion_bot.py"
 
