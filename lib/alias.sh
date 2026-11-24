@@ -76,23 +76,30 @@ else
 	_alias_sh="${BASH_SOURCE[0]:-$0}"
 fi
 _alias_sh_dir="$(cd -- "$(dirname -- "${_alias_sh}")" && pwd)"
+sim="${sim:-$(cd -- "$_alias_sh_dir/.." && pwd)}"
 dmenu(){ "$_alias_sh_dir/../bin/menu.sh" "$@"; }
 alias dmn='dmenu' 
 
 gameble(){
+	local py_cmd="python"
+	command -v python >/dev/null 2>&1 || py_cmd="py"
 
 	case "$1" in
+		-chk|--check|status|--status)
+				shift
+				"$py_cmd" "$sim/bin/fusion_native.py" --status "$@"
+				;;
 		-t|--test) 
 				shift
-				py $sim/bin/fusion_bot.py "$@"
+				"$py_cmd" "$sim/bin/fusion_bot.py" "$@"
 				;;
 		-n|--native|-s|--standalone)
 				shift
-				py $sim/bin/fusion_native.py "$@"
+				"$py_cmd" "$sim/bin/fusion_native.py" "$@"
 				;;
 		-d|--dashboard)
 				shift
-				py $sim/bin/fusion_live_hud.py "$@"
+				"$py_cmd" "$sim/bin/fusion_live_hud.py" "$@"
 				;;
 		-c|--config)
 				micro "$sim/config/fusion.env"
@@ -101,10 +108,12 @@ gameble(){
 				d-start_help
 				;;
 		*)
-				py $sim/bin/fusion_live_hud.py "$@"
+				"$py_cmd" "$sim/bin/fusion_live_hud.py" "$@"
 				;;
 	esac				
 }
+gbb(){ gameble "$@"; }
+gmm(){ gameble "$@"; }
 alias gbb='gameble' 
 alias gmm='gameble' 
 

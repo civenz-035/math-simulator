@@ -155,6 +155,36 @@ class StakeClient:
 
         return data
 
+    def test_connection(self) -> tuple[bool, str, float]:
+        """Tests API connectivity and measures response latency (seconds)."""
+        t0 = time.time()
+        try:
+            data = self._request_gql(BALANCE_QUERY)
+            lat = time.time() - t0
+            user = (data.get("data") or {}).get("user") or {}
+            user_id = user.get("id") or "OK"
+            return True, f"Connected (User ID: {user_id})", lat
+        except Exception as e:
+            lat = time.time() - t0
+            return False, str(e), lat
+
+    def get_account_info(self) -> dict[str, Any]:
+        """Returns comprehensive account info including all non-zero balances."""
+        data = self._request_gql(BALANCE_QUERY)
+        user = (data.get("data") or {}).get("user") or {}
+        balances = (user.get("balances") or {}).get("available") or []
+        bal_dict: dict[str, float] = {}
+        for b in balances:
+            c = b.get("currency", "").lower()
+            amt = float(b.get("amount", 0.0) or 0.0)
+            if c:
+                bal_dict[c] = amt
+        return {
+            "id": user.get("id", ""),
+            "name": user.get("name") or "Stake User",
+            "balances": bal_dict,
+        }
+
     def get_balances(self) -> dict[str, float]:
         """Returns dict of {currency: available_amount}."""
         data = self._request_gql(BALANCE_QUERY)

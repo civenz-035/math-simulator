@@ -1,24 +1,27 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════════════════════════════╗
-║  💎 FUSION BOT NATIVE v1.0 — Standalone Casino Execution Engine  ║
-║  Independent Stake Direct-API Engine (No Gambler.Bot Needed!)    ║
-║  Exact Strategy Match with fusion_bot.py · SSOT fusion.env       ║
+║  💎 FUSION BOT NATIVE v1.0 — Standalone Casino Execution Engine       ║
+║  Accurate Simulation of fusion_bot_gamblerbot.py (Stake / GB)    ║
+║  Live Roll Stream + Pinned Bottom HUD Box · SSOT fusion.env     ║
 ╚══════════════════════════════════════════════════════════════════╝
 
+Features:
+  - 100% logic alignment with fusion_bot_gamblerbot.py (Gambler.Bot IronPython)
+  - Stake Dice Mechanics: Roll 0.00-99.99, High=True (Roll Over Target 100-Chance)
+  - Mode 1: WAGER FOCUS + RECOVERY (Flat wager bet -> Loss cut -> Profit recovery -> Vault & Reset)
+  - Mode 2: PROFIT FOCUS (Dynamic Martingale with Auto-Chance and Risk Bonus)
+  - Dual-layer Output (rock solid, zero jitter):
+      * Rolls stream & scroll upwards in terminal history (strictly <= 70 chars)
+      * Real-time Summary Box is pinned at the bottom and updates every roll in-place
+  - Full CSV logging matching dice_session_latest.csv schema (11 columns)
+
 Usage:
-  # 1. Mock Sandbox Mode (100% mirrors fusion_bot.py logic with simulated rolls)
-  python bin/fusion_native.py --mock
-  python bin/fusion_native.py --mock -m 2 -r 500
-
-  # 2. Live Casino Mode (Direct Stake GraphQL API with real balance & real rolls)
-  python bin/fusion_native.py --live --currency trx
-  python bin/fusion_native.py --live --currency usdt --url https://stake.bz
-
-  # 3. Live HUD Projection in another terminal:
-  python bin/fusion_live_hud.py real
+  python bin/fusion_bot.py                         # defaults from config/fusion.env
+  python bin/fusion_bot.py -m 1 -r 500 -d 0.02     # Mode 1, 500 rounds, 20ms delay
+  python bin/fusion_bot.py -m 2 -r 1000 -d 0       # Mode 2, max speed
+  python bin/fusion_bot.py -q                      # Headless (JSON summary)
 """
-
 from __future__ import annotations
 
 import argparse
@@ -33,6 +36,11 @@ import sys
 import threading
 import time
 import unicodedata
+# ── Stake Live Connector Import ──────────────────────────────────────────────
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
+from lib.stake_api import StakeClient, StakeAPIError, StakeAuthError, StakeBetError
+
 
 # ── Force UTF-8 on Windows Consoles ─────────────────────────────────────────
 for _stream in (sys.stdout, sys.stderr):
@@ -40,14 +48,6 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8", errors="replace")
     except (AttributeError, ValueError):
         pass
-
-# Add repo root to sys.path
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(_REPO_ROOT))
-
-from lib.stake_api import (
-    StakeClient, StakeAPIError, StakeAuthError, StakeBetError
-)
 
 # ── Graceful Stop Handler ───────────────────────────────────────────────────
 _user_stop: bool = False
@@ -64,15 +64,16 @@ def _stdin_watcher():
     try:
         while not _user_stop:
             line = sys.stdin.readline()
-            if not line:
-                break
             if line.strip().lower() == "q":
                 _user_stop = True
                 break
     except Exception:
         pass
 
-# ── ANSI Color Helpers ───────────────────────────────────────────────────────
+
+# ══════════════════════════════════════════════════════════════════
+# [0] ANSI COLOR & TUI HELPERS
+# ══════════════════════════════════════════════════════════════════
 def cn(code: int, text: str, bold: bool = False) -> str:
     style = "1;" if bold else ""
     return f"\033[{style}38;5;{code}m{text}\033[0m"
@@ -85,6 +86,8 @@ def neg_c(t: object) -> str: return cn(196, str(t), True)
 def yel_c(t: object) -> str: return cn(220, str(t), True)
 def cya_c(t: object) -> str: return cn(51,  str(t), True)
 def pur_c(t: object) -> str: return cn(171, str(t), True)
+def blu_c(t: object) -> str: return cn(75,  str(t), True)
+def ora_c(t: object) -> str: return cn(208, str(t), True)
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 
@@ -114,18 +117,21 @@ def header_line(title: str, width: int = 72) -> str:
 def footer_line(width: int = 72) -> str:
     return "└" + "─" * (width - 2) + "┘"
 
-def progress_bar(val: float, total: float, width: int = 16) -> str:
+def progress_bar(val: float, total: float, width: int = 14) -> str:
     pct = max(0.0, min(1.0, val / total)) if total > 0 else 0.0
     filled = int(round(pct * width))
     bar = "█" * filled + "░" * (width - filled)
-    return f"[{bar}] {pct*100:5.1f}%"
+    return f"[{bar}] {pct * 100:5.1f}%"
 
-# ── SSOT Config Loader ───────────────────────────────────────────────────────
+
+# ══════════════════════════════════════════════════════════════════
+# [1] SSOT CONFIG LOADER (config/fusion.env > config/dice.env)
+# ══════════════════════════════════════════════════════════════════
 _ENV_REF_RE = re.compile(r"\$\{(\w+)(?::-)?\}|\$(\w+)")
 
-def load_env_config() -> tuple[dict[str, str], Path]:
+def load_env_config() -> dict[str, str]:
     cfg: dict[str, str] = {}
-    repo_root = _REPO_ROOT
+    repo_root = Path(__file__).resolve().parent.parent
     env_override = os.environ.get("FUSION_CONFIG") or os.environ.get("DICE_CONFIG")
     candidates = [
         Path(env_override) if env_override else None,
@@ -135,6 +141,8 @@ def load_env_config() -> tuple[dict[str, str], Path]:
         Path(r"c:\Users\User\simulator\config\fusion.env"),
         repo_root / "config" / "dice.env",
         repo_root / "dice.env",
+        Path.cwd() / "config" / "dice.env",
+        Path(r"c:\Users\User\simulator\config\dice.env"),
     ]
     env_path = None
     for p in candidates:
@@ -154,18 +162,29 @@ def load_env_config() -> tuple[dict[str, str], Path]:
         except Exception:
             pass
 
-    for _ in range(3):
+    # Process Environment Overrides
+    for k, v in os.environ.items():
+        if k in cfg or any(k.startswith(p) for p in (
+            "FUSION_", "WAGER_", "PROFIT_", "BRAVE_", "GLOBAL_", "CUSTOM_"
+        )):
+            cfg[k] = v
+
+    # Expand variable references
+    for _ in range(5):
         changed = False
         for k in list(cfg):
             v = cfg[k]
-            new_v = _ENV_REF_RE.sub(lambda m: cfg.get(m.group(1) or m.group(2), ""), v)
+            new_v = _ENV_REF_RE.sub(
+                lambda m: cfg.get(m.group(1) or m.group(2), "") or os.environ.get(m.group(1) or m.group(2), ""),
+                v
+            )
             if new_v != v:
                 cfg[k] = new_v
                 changed = True
         if not changed:
             break
 
-    return cfg, (env_path or repo_root / "config" / "fusion.env")
+    return cfg
 
 def _cv(cfg: dict[str, str], key: str, default, cast=str):
     v = cfg.get(key, "").strip()
@@ -176,18 +195,23 @@ def _cv(cfg: dict[str, str], key: str, default, cast=str):
     except (ValueError, TypeError):
         return default
 
-# ── CSV Logging (Logs to dice_session_real.csv & mirrors to dice_session_latest.csv) ──
+
+# ══════════════════════════════════════════════════════════════════
+# [2] CSV LOGGER (Matches fusion_bot_gamblerbot.py 11 columns)
+# ══════════════════════════════════════════════════════════════════
 def get_csv_paths(custom_path: str | None = None) -> list[Path]:
-    logs_dir = _REPO_ROOT / "logs"
+    repo_root = Path(__file__).resolve().parent.parent
+    logs_dir = repo_root / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
     if custom_path:
         return [Path(custom_path)]
-    real_path = logs_dir / "dice_session_real.csv"
+    sim_path = logs_dir / "dice_session_real.csv"
     latest_path = logs_dir / "dice_session_latest.csv"
-    return [real_path, latest_path]
+    return [sim_path, latest_path]
 
-def init_csv(paths: list[Path]) -> None:
-    for p in paths:
+def init_csv(paths: list[Path] | Path) -> None:
+    targets = [paths] if isinstance(paths, Path) else paths
+    for p in targets:
         try:
             with open(p, "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
@@ -200,11 +224,12 @@ def init_csv(paths: list[Path]) -> None:
             pass
 
 def log_csv_row(
-    paths: list[Path], rnd: int, mode: str, result: str, roll_val: float,
+    paths: list[Path] | Path, rnd: int, mode: str, result: str, roll_val: float,
     bet_amt: float, round_pnl: float, net_pnl: float, bal: float,
     streak: int, vault: float, con_losses: int,
     chance: float = 0.0, payout: float = 0.0, loss_mul: float = 0.0
 ) -> None:
+    targets = [paths] if isinstance(paths, Path) else paths
     row = [
         rnd, mode, result,
         f"{roll_val:.2f}",
@@ -219,17 +244,20 @@ def log_csv_row(
         f"{payout:.4f}",
         f"{loss_mul:.4f}",
     ]
-    for p in paths:
+    for p in targets:
         try:
             with open(p, "a", newline="", encoding="utf-8") as f:
                 csv.writer(f).writerow(row)
         except OSError:
             pass
 
-# ── Math Engine (100% Identical to fusion_bot.py & gamblerbot) ───────────────
+
+# ══════════════════════════════════════════════════════════════════
+# [3] FUSION MATH ENGINE (Exact Port from fusion_bot_gamblerbot.py)
+# ══════════════════════════════════════════════════════════════════
 def random_chance(chance_min: float, chance_max: float) -> float:
     c = random.uniform(chance_min, chance_max)
-    return max(0.01, min(98.0, c))
+    return max(0.01, min(99.0, c))
 
 def get_payout_and_multiplier(
     chance_pct: float,
@@ -237,19 +265,32 @@ def get_payout_and_multiplier(
     use_house_edge: bool,
     house_edge: float = 1.0,
 ) -> tuple[float, float]:
+    """Matches Gambler.Bot / Lua getAutoMultiplierByChance()"""
     cd = max(0.0001, min(0.9999, chance_pct / 100.0))
-    payout = (1.0 - house_edge / 100.0) / cd if use_house_edge and house_edge > 0 else 1.0 / cd
-    mult = 1.0 + (payout - 1.0) * (1.0 + bonus_pct / 100.0)
-    return mult, payout
+    if use_house_edge and house_edge > 0:
+        payout = (1.0 - house_edge / 100.0) / cd
+    else:
+        payout = 0.99 / cd
+    if payout <= 1.0:
+        payout = 1.0001
+    multiplier = 1.0 + (1.0 + bonus_pct / 100.0) / (payout - 1.0)
+    return multiplier, payout
 
 def get_constant_divisor_by_mul(mul: float, losses: int) -> float:
+    """Geometric series sum_{i=0}^{losses-1} mul^i with overflow protection."""
     if mul <= 1.0:
         return float(max(1, losses))
     try:
         if (losses - 1) * math.log(mul) > 700.0:
             return float("inf")
-        return (mul ** losses - 1.0) / (mul - 1.0)
-    except OverflowError:
+        total = 0.0
+        for i in range(losses):
+            term = math.pow(mul, i)
+            total += term
+            if math.isinf(total):
+                return float("inf")
+        return total
+    except (OverflowError, ValueError):
         return float("inf")
 
 def solve_base_bet_with_mul(cycle_bal: float, mul: float, losses: int, min_bet: float) -> tuple[float, float]:
@@ -259,7 +300,32 @@ def solve_base_bet_with_mul(cycle_bal: float, mul: float, losses: int, min_bet: 
     base = cycle_bal / d
     return max(base, min_bet), d
 
+def get_constant_divisor(
+    chance_ref: float,
+    bonus_pct: float,
+    losses: int,
+    use_house_edge: bool,
+    house_edge: float = 1.0,
+) -> float:
+    mul, _ = get_payout_and_multiplier(chance_ref, bonus_pct, use_house_edge, house_edge)
+    return get_constant_divisor_by_mul(mul, losses)
+
+def solve_base_bet(
+    cycle_bal: float,
+    chance_ref: float,
+    bonus_pct: float,
+    losses: int,
+    min_bet: float,
+    use_he: bool,
+    house_edge: float = 1.0,
+) -> tuple[float, float]:
+    mul, _ = get_payout_and_multiplier(chance_ref, bonus_pct, use_he, house_edge)
+    return solve_base_bet_with_mul(cycle_bal, mul, losses, min_bet)
+
 def solve_dynamic_allowed_losses(chance_pct: float, risk_alpha: float = 0.001) -> int:
+    """Calculate maximum consecutive losses (N) allowed to keep streak ruin probability <= risk_alpha.
+    Formula: P(Lose N in a row) = q^N <= alpha  =>  N = ceil(ln(alpha) / ln(1 - p))
+    """
     p = max(0.0001, min(0.9999, chance_pct / 100.0))
     q = 1.0 - p
     if q >= 1.0:
@@ -267,117 +333,367 @@ def solve_dynamic_allowed_losses(chance_pct: float, risk_alpha: float = 0.001) -
     n = math.ceil(math.log(risk_alpha) / math.log(q))
     return max(3, int(n))
 
-# ── Stake Dice Roll Simulator (Mock Mode) ────────────────────────────────────
-def roll_stake_dice_mock(chance_pct: float, high: bool = True, house_edge: float = 1.0) -> tuple[float, bool, float]:
-    roll = round(random.uniform(0.00, 99.99), 2)
-    target = round(100.0 - chance_pct, 2) if high else round(chance_pct, 2)
-    won = (roll >= target) if high else (roll < target)
-    cd = max(0.0001, min(0.9999, chance_pct / 100.0))
-    payout = (1.0 - house_edge / 100.0) / cd
-    if payout <= 1.0:
-        payout = 1.0001
-    return roll, won, payout
 
-# ══════════════════════════════════════════════════════════════════════════════
-# MAIN RUNNER
-# ══════════════════════════════════════════════════════════════════════════════
-def main():
-    global _user_stop
-    cfg, env_file_path = load_env_config()
+# ══════════════════════════════════════════════════════════════════
+# [4] ARGUMENT PARSER
+# ══════════════════════════════════════════════════════════════════
+def parse_args(cfg: dict[str, str]):
+    # Normalize positional commands like 'status' or 'check' to --status
+    if len(sys.argv) > 1 and sys.argv[1].lower() in ("status", "check", "-chk"):
+        sys.argv[1] = "--status"
 
-    parser = argparse.ArgumentParser(
-        description="💎 FUSION BOT NATIVE — Standalone Casino Execution Engine",
+    p = argparse.ArgumentParser(
+        description="💎 FUSION BOT v4.1 — Real Simulation Engine (fusion_bot_gamblerbot.py simulator)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--live", action="store_true", help="Live casino real-money betting via Stake API")
-    parser.add_argument("--mock", action="store_true", help="Mock dry-run simulation mode")
-    parser.add_argument("--currency", "-c", type=str, default="trx", help="Crypto currency symbol (trx, usdt, etc.)")
-    parser.add_argument("--api-key", "-k", type=str, default=None, help="Stake API Access Token")
-    parser.add_argument("--url", type=str, default="https://stake.bz", help="Stake Base URL")
-    parser.add_argument("--mode", "-m", type=int, default=_cv(cfg, "FUSION_MAIN_MODE", 2, int),
-                        help="1=WAGER FOCUS+RECOVERY, 2=PROFIT FOCUS")
-    parser.add_argument("--balance", "-b", type=float, default=_cv(cfg, "START_BALANCE", 25.0, float),
-                        help="Starting balance (used in Mock mode)")
-    parser.add_argument("--rounds", "-r", type=int, default=_cv(cfg, "GLOBAL_MAX_ROUNDS", 200000, int),
-                        help="Maximum rounds cap")
-    parser.add_argument("--delay", "-d", type=float, default=_cv(cfg, "GLOBAL_ROUND_DELAY", 0.05, float),
-                        help="Delay in seconds between rolls")
-    parser.add_argument("--vault", type=int, default=None,
-                        help="1=Vault (skim profit), 0=Compound. Overrides env.")
-    args = parser.parse_args()
+    p.add_argument("--status", "--check", "-chk", action="store_true",
+                   help="Run comprehensive Pre-flight Status & Audit Check (balances, config, connectivity)")
+    p.add_argument("--live", action="store_true",
+                   help="Live casino real-money betting via Stake API")
+    p.add_argument("--mock", action="store_true",
+                   help="Mock simulation mode (default)")
+    p.add_argument("--currency", "-c", type=str, default=_cv(cfg, "STAKE_CURRENCY", "trx", str),
+                   help="Crypto currency symbol for live play (trx, usdt, etc.)")
+    p.add_argument("--api-key", "-k", type=str, default=_cv(cfg, "STAKE_API_KEY", "", str) or None,
+                   help="Stake API Access Token")
+    p.add_argument("--url", type=str, default=_cv(cfg, "STAKE_BASE_URL", "https://stake.bz", str),
+                   help="Stake Base URL")
+    p.add_argument("--mode", "-m", type=int, choices=[1, 2],
+                   default=_cv(cfg, "FUSION_MAIN_MODE", 1, int),
+                   help="1=WAGER FOCUS+RECOVERY, 2=PROFIT FOCUS")
+    p.add_argument("--balance", "-b", type=float,
+                   default=_cv(cfg, "START_BALANCE", 10_000.0, float),
+                   help="Starting bankroll balance")
+    p.add_argument("--rounds", "-r", type=int,
+                   default=_cv(cfg, "GLOBAL_MAX_ROUNDS", 1000, int),
+                   help="Maximum rounds to simulate")
+    p.add_argument("--delay", "-d", type=float,
+                   default=_cv(cfg, "GLOBAL_ROUND_DELAY", 0.02, float),
+                   help="Delay in seconds between rolls for visual inspection")
+    p.add_argument("--seed", type=int, default=None,
+                   help="RNG seed for reproducible simulation")
+    p.add_argument("--quiet", "-q", action="store_true",
+                   help="Headless mode — emit __RESULT_JSON__ at end")
+    p.add_argument("--monitor", action="store_true",
+                   help="Launch Live ANSI HUD Monitor (tails Gambler.Bot CSV)")
+    p.add_argument("--csv", type=str, default=None,
+                   help="Custom CSV log path (default: logs/dice_session_sim.csv)")
+    p.add_argument("--vault", type=int, default=None,
+                   help="Vault mode: 1=Vault (skim profit), 0=Compound (use full balance). Overrides FUSION_ENABLE_VAULT env.")
+    return p.parse_args()
 
-    # Determine execution mode
-    is_live = args.live
-    if not is_live and not args.mock:
-        print(header_line(cn(51, "💎 FUSION BOT NATIVE — Select Execution Mode", True), 72))
-        print(pad_line("Choose mode:", 70))
-        print(pad_line(f"  {yel_c('[1]')} {pos_c('🎲 Mock Dry-Run (Offline Test, Zero Risk)')}", 70))
-        print(pad_line(f"  {yel_c('[2]')} {neg_c('🔥 LIVE REAL MONEY (Stake Direct API)')}", 70))
-        print(footer_line(72))
-        try:
-            choice = input(cn(51, "\n  Select [1/2] (Default: 1 Mock): ", True)).strip()
-        except (KeyboardInterrupt, EOFError):
-            return
-        is_live = (choice == "2")
 
-    # API Setup
+# ══════════════════════════════════════════════════════════════════
+# [5] PINNED SUMMARY BOX BUILDER (Fixed 11 lines, strictly <= 72 w)
+# ══════════════════════════════════════════════════════════════════
+def build_pinned_hud(
+    *,
+    rnd: int, max_rnd: int, mode: str, main_mode: int,
+    balance: float, start_balance: float,
+    profit_vault: float, total_profit: float,
+    enable_vault: bool = True,
+    next_bet: float, next_chance: float,
+    next_payout: float = 0.0, next_loss_mul: float = 1.0,
+    win_count: int, lose_count: int, loss_streak: int, max_loss_streak: int,
+    total_wagered: float, wager_target: float,
+    allowed_losses: int, consecutive_losses: int,
+    loss_cut_pct: float, current_loss_pct: float,
+    runtime: float, recover_needed: float, current_gain: float,
+) -> list[str]:
+    W = 70
+    strat_tag = pos_c("WAGER FOCUS+RECOVERY") if main_mode == 1 else yel_c("PROFIT FOCUS")
+    mode_badge = pos_c("● WAGER") if mode == "WAGER" else yel_c("▲ PROFIT")
+    pnl_c = pos_c if total_profit >= 0 else neg_c
+    vault_c = pos_c if profit_vault > 0 else _gr
+
+    round_pb = progress_bar(rnd, max_rnd, 14)
+    w_pct = (win_count / rnd * 100.0) if rnd > 0 else 0.0
+
+    # Exactly 11 lines in both modes (Rock Solid, Zero Height Jitter)
+    lines: list[str] = [
+        header_line(f"💎 FUSION BOT v4.1  #{_wc(str(rnd))}/{_gr(str(max_rnd))}", W + 2),
+        col_row(f"⏱  {_wc(f'{runtime:.0f}s')} │ {strat_tag}", f"Mode: {mode_badge}", 42, W),
+        pad_line("─" * W, W),
+        col_row(
+            f"💰 Balance: {_wc(f'{balance:.8f}')}",
+            (f"💎 Vault: {vault_c(f'{profit_vault:.8f}')}" if enable_vault
+             else f"💎 Vault: {_gr('OFF (Compound)')}"), 36, W
+        ),
+        col_row(
+            f"🎁 Net P/L: {pnl_c(f'{total_profit:+.8f}')} ({pnl_c(f'{total_profit/start_balance*100:+.2f}%')})",
+            f"🎲 Next:  {yel_c(f'{next_bet:.8f}')}", 36, W
+        ),
+        col_row(
+            f"🎯 Chance:  {cya_c(f'{next_chance:.2f}%')} │ Payout: {_wc(f'{next_payout:.4f}x')}",
+            f"Loss Mul: {yel_c(f'{next_loss_mul:.4f}x')}", 42, W
+        ),
+        col_row(
+            f"🏆 W/L: {pos_c(str(win_count))}/{neg_c(str(lose_count))} ({w_pct:.1f}%)",
+            f"Streak: {neg_c(str(loss_streak))} (Max {max_loss_streak})", 36, W
+        ),
+        pad_line("─" * W, W),
+    ]
+
+    if main_mode == 1:
+        if mode == "WAGER":
+            wager_pb = progress_bar(total_wagered, wager_target, 14) if wager_target > 0 else "N/A"
+            loss_pb = progress_bar(current_loss_pct, loss_cut_pct, 14)
+            lines.append(col_row(
+                f"📈 Wagered:  {cya_c(f'{total_wagered:.2f}')}/{_gr(f'{wager_target:.2f}')}",
+                wager_pb, 36, W
+            ))
+            lines.append(col_row(
+                f"📉 Loss Cut: {neg_c(f'{current_loss_pct:.2f}%')}/{_gr(f'{loss_cut_pct:.2f}%')}",
+                loss_pb, 36, W
+            ))
+        else:
+            rec_pb = progress_bar(max(0.0, current_gain), max(0.0001, recover_needed), 14)
+            con_pb = progress_bar(consecutive_losses, allowed_losses, 14)
+            lines.append(col_row(
+                f"♻  Recovery: {pos_c(f'{current_gain:+.4f}')}/{yel_c(f'{recover_needed:.4f}')}",
+                rec_pb, 36, W
+            ))
+            lines.append(col_row(
+                f"⚡ Con.Loss: {neg_c(str(consecutive_losses))}/{_gr(str(allowed_losses))}",
+                con_pb, 36, W
+            ))
+    else:
+        con_pb = progress_bar(consecutive_losses, allowed_losses, 14)
+        lines.append(col_row(
+            f"📈 Wagered:  {cya_c(f'{total_wagered:.4f}')}",
+            f"Allowed: {_wc(str(allowed_losses))}", 36, W
+        ))
+        lines.append(col_row(
+            f"⚡ Con.Loss: {neg_c(str(consecutive_losses))}/{_gr(str(allowed_losses))}",
+            con_pb, 36, W
+        ))
+
+    lines.append(col_row(f"🔢 Progress: {_wc(str(rnd))}/{_gr(str(max_rnd))}", round_pb, 36, W))
+    lines.append(footer_line(W + 2))
+    return lines
+
+
+# ══════════════════════════════════════════════════════════════════
+# [5.5] PRE-FLIGHT STATUS & AUDIT CHECK
+# ══════════════════════════════════════════════════════════════════
+def run_status_check(cfg: dict[str, str], args: argparse.Namespace):
+    from lib.stake_api import find_cached_cookies, HAS_CURL_CFFI
+    
+    W = 74
+    repo_root = _REPO_ROOT
+    candidates = [
+        Path(os.environ.get("FUSION_CONFIG") or ""),
+        repo_root / "config" / "fusion.env",
+        repo_root / "fusion.env",
+        Path.cwd() / "config" / "fusion.env",
+        Path(r"c:\Users\User\simulator\config\fusion.env"),
+    ]
+    cfg_file = next((p for p in candidates if p and p.is_file()), repo_root / "config" / "fusion.env")
+
+    print(cn(51, "═" * W, True))
+    print(cn(255, "  💎 FUSION NATIVE — PRE-FLIGHT STATUS & AUDIT CHECK", True))
+    print(cn(51, "═" * W, True))
+
+    # 1. Configuration Audit
+    main_mode = args.mode if args.mode else _cv(cfg, "FUSION_MAIN_MODE", 2, int)
+    strat_name = "WAGER FOCUS + RECOVERY" if main_mode == 1 else "PROFIT FOCUS (Martingale)"
+    vault_mode = "Vault & Reset (Skim)" if _cv(cfg, "FUSION_ENABLE_VAULT", 0, int) != 0 else "Compound (All Balance)"
+    auto_chance = _cv(cfg, "FUSION_AUTO_CHANCE", 1, int) != 0
+    c_min = _cv(cfg, "FUSION_CHANCE_MIN", 0.5, float)
+    c_max = _cv(cfg, "FUSION_CHANCE_MAX", 18.0, float)
+    c_fix = _cv(cfg, "FUSION_CHANCE_FIXED", 0.5, float)
+    chance_str = f"Auto ({c_min:.2f}% - {c_max:.2f}%)" if auto_chance else f"Fixed ({c_fix:.2f}%)"
+    base_mode = "Auto (Dynamic Divisor)" if _cv(cfg, "AUTO_CAL_BASE_BET", 1, int) != 0 else f"Manual ({_cv(cfg, 'FUSION_MANUAL_BASE_BET', 0.0001, float):.8f})"
+    mul_mode = f"Auto (+{_cv(cfg, 'FUSION_RISK_BONUS_PCT', 10.0, float):.1f}% Bonus)" if _cv(cfg, "AUTO_CAL_LOSS_MUL", 1, int) != 0 else f"Manual ({_cv(cfg, 'FUSION_MANUAL_LOSS_MUL', 1.05, float):.4f}x)"
+    min_bet_val = _cv(cfg, "FUSION_MIN_BET", 0.0001, float)
+    stop_p = _cv(cfg, "FUSION_STOP_PROFIT", 1.0, float)
+    stop_l = _cv(cfg, "FUSION_STOP_LOSS", 0.0, float)
+
+    print(f"  {_wc('📁 Configuration (SSOT)')}")
+    print(f"  ├─ Config File      : {_wc(str(cfg_file))}")
+    print(f"  ├─ Strategy Mode    : {yel_c(f'[{main_mode}] {strat_name}')}")
+    print(f"  ├─ Vault Mode       : {_wc(vault_mode)}")
+    print(f"  ├─ Chance Setup     : {_wc(chance_str)}")
+    print(f"  ├─ Base Bet Mode    : {_wc(base_mode)}  │  Min Bet: {_wc(f'{min_bet_val:.8f}')}")
+    print(f"  ├─ Loss Multiplier  : {_wc(mul_mode)}")
+    print(f"  └─ Safety Caps      : Take Profit: {pos_c(f'+{stop_p*100:.1f}%') if stop_p > 0 else 'Disabled'} │ Stop Loss: {neg_c(f'-{stop_l*100:.1f}%') if stop_l > 0 else 'Disabled'}")
+    print()
+
+    # 2. API Connection & Credentials
     api_key = args.api_key or os.environ.get("STAKE_API_KEY") or _cv(cfg, "STAKE_API_KEY", "")
-    if not api_key:
-        api_key = "522fe34470a71f0662cfc2ec39b887f54e34459125cdc8ed646b366f7a997635d9a75e03b162df944ceaa9cc644be544"
+    target_currency = (args.currency or _cv(cfg, "STAKE_CURRENCY", "trx", str)).lower()
+    base_url = (args.url or _cv(cfg, "STAKE_BASE_URL", "https://stake.bz", str)).rstrip("/")
 
-    client: StakeClient | None = None
-    currency = args.currency.lower()
-    balance = float(args.balance)
+    cached_cookies = find_cached_cookies()
+    cookie_str = pos_c("Cached cookies found") if cached_cookies else yel_c("No cache (direct/new session)")
+    tls_str = pos_c("curl_cffi (Chrome TLS Impersonation)") if HAS_CURL_CFFI else yel_c("requests (Standard TLS)")
 
+    masked_key = f"{api_key[:8]}...{api_key[-6:]}" if len(api_key) > 16 else (api_key or "NOT SET")
+
+    print(f"  {_wc('🌐 Stake Live API Connection')}")
+    print(f"  ├─ Endpoint URL     : {_wc(base_url)}")
+    print(f"  ├─ API Token        : {_wc(masked_key)}")
+    print(f"  ├─ TLS Engine       : {tls_str}")
+    print(f"  ├─ Cloudflare WAF   : {cookie_str}")
+
+    client = StakeClient(api_key=api_key, base_url=base_url)
+    connected, conn_msg, lat = client.test_connection()
+
+    if connected:
+        print(f"  └─ Connection Test  : {pos_c('🟢 CONNECTED')} {_gr(f'({lat*1000:.0f}ms latency)')}")
+    else:
+        print(f"  └─ Connection Test  : {neg_c('🔴 FAILED')} {_gr(f'({conn_msg[:50]}...)')}")
+    print()
+
+    # 3. Live Account Balances
+    live_bal = 0.0
+    if connected:
+        info = client.get_account_info()
+        balances = info.get("balances", {})
+        active_bal = balances.get(target_currency, 0.0)
+        live_bal = active_bal
+
+        print(f"  {_wc('💰 Live Account Balances (Stake Live API)')}")
+        print(f"  ├─ User ID          : {_wc(info.get('id', 'N/A'))}")
+        print(f"  ├─ Target Currency  : {cya_c(target_currency.upper())}  -->  {pos_c(f'{active_bal:.8f} {target_currency.upper()}')} {yel_c('◄ [SELECTED TO PLAY]')}")
+
+        other_coins = [c for c in balances if c != target_currency and balances[c] > 0]
+        if other_coins:
+            print(f"  └─ Other Balances   :")
+            for c in other_coins[:6]:
+                print(f"     • {c.upper():<6}: {balances[c]:.8f}")
+        else:
+            print(f"  └─ Other Balances   : None with positive balance")
+    else:
+        fallback_bal = _cv(cfg, "START_BALANCE", 25.0, float)
+        print(f"  {_wc('💰 Live Account Balances')}")
+        print(f"  └─ {neg_c('Unable to fetch live balance (API connection offline)')}")
+        print(f"     Fallback Mock Bankroll: {_wc(f'{fallback_bal:.8f}')} (used in --mock mode)")
+    print()
+
+    # 4. Strategy Pre-Flight Calculation
+    ref_bal = live_bal if connected and live_bal > 0 else _cv(cfg, "START_BALANCE", 25.0, float)
+    he = _cv(cfg, "HE", 1.0, float)
+    risk_alpha = _cv(cfg, "FUSION_RISK_ALPHA", 0.01, float)
+    bonus_pct = _cv(cfg, "FUSION_RISK_BONUS_PCT", 10.0, float)
+
+    est_chance = (c_min + c_max) / 2.0 if auto_chance else c_fix
+    est_n = solve_dynamic_allowed_losses(est_chance, risk_alpha)
+    est_mul, _ = get_payout_and_multiplier(est_chance, bonus_pct, main_mode == 2, he)
+    est_base, est_div = solve_base_bet_with_mul(ref_bal, est_mul, est_n, min_bet_val)
+
+    print(f"  {_wc('🧮 Math Pre-Flight Check')}")
+    print(f"  ├─ Bankroll Base    : {_wc(f'{ref_bal:.8f}')} {target_currency.upper()} ({'LIVE API' if connected and live_bal > 0 else 'SIMULATED MOCK'})")
+    print(f"  ├─ Target Chance    : ~{est_chance:.2f}% (Allowed N: ~{est_n} losses)")
+    print(f"  ├─ Dynamic Multiplier: ~{est_mul:.4f}x")
+    print(f"  ├─ Initial Base Bet : {pos_c(f'{est_base:.8f}')} {target_currency.upper()} (Divisor: {est_div:.2f})")
+    
+    # Verdict
+    if connected and live_bal >= min_bet_val * 10:
+        verdict = f"{pos_c('🟢 READY FOR LIVE PLAY')} — Everything verified, balance sufficient."
+    elif connected and live_bal > 0:
+        verdict = f"{yel_c('🟡 LOW BALANCE')} — Balance is low ({live_bal:.8f} {target_currency.upper()}). Consider depositing or testing with --mock."
+    elif connected and live_bal <= 0:
+        verdict = f"{neg_c('🔴 NO BALANCE')} — {target_currency.upper()} balance is 0.00000000. Please deposit before running --live."
+    else:
+        verdict = f"{neg_c('🔴 NOT CONNECTED')} — Check network, domain, or Cloudflare cookies. You can still run offline with --mock."
+
+    print(f"  └─ Pre-Flight Verdict: {verdict}")
+    print()
+    print(f"  {_wc('💡 Commands:')}")
+    print(f"     Run Live Real Money: {cya_c(f'gmm -n --live -c {target_currency}')}")
+    print(f"     Run Offline Mock   : {cya_c('gmm -n --mock')}")
+    print(cn(51, "═" * W, True))
+
+
+# ══════════════════════════════════════════════════════════════════
+# [6] MAIN SIMULATION LOGIC
+# ══════════════════════════════════════════════════════════════════
+def run_simulation():
+    global _user_stop
+
+    cfg = load_env_config()
+    args = parse_args(cfg)
+
+    if args.status:
+        run_status_check(cfg, args)
+        return
+
+    if args.monitor:
+        try:
+            from fusion_live_hud import main as monitor_main
+        except ImportError:
+            from bin.fusion_live_hud import main as monitor_main
+        monitor_main()
+        return
+
+    if args.seed is not None:
+        random.seed(args.seed)
+
+    quiet = args.quiet
+    round_delay = 0.0 if quiet else max(0.0, args.delay)
+    max_rounds = args.rounds
+    main_mode = args.mode
+
+    def cv(key, default, cast=str):
+        return _cv(cfg, key, default, cast)
+
+    # ── CONFIG PARAMETERS (100% Alignment with fusion_bot_gamblerbot.py) ──
+    is_live = bool(args.live)
+    currency = str(args.currency).lower()
+    client = None
     if is_live:
+        api_key = args.api_key or os.environ.get("STAKE_API_KEY") or cv("STAKE_API_KEY", "")
+        if not api_key:
+            api_key = "522fe34470a71f0662cfc2ec39b887f54e34459125cdc8ed646b366f7a997635d9a75e03b162df944ceaa9cc644be544"
         print(cn(220, f"\n  Connecting to Stake API ({args.url}) with currency '{currency.upper()}'..."))
         client = StakeClient(api_key=api_key, base_url=args.url)
         try:
             live_bal = client.get_currency_balance(currency)
             print(pos_c(f"  ✅ Connected successfully! Account Balance: {live_bal:.8f} {currency.upper()}"))
             if live_bal <= 0:
-                print(neg_c(f"  ❌ Available {currency.upper()} balance is 0.00000000. Please deposit or choose another currency."))
+                print(neg_c(f"  ❌ Available {currency.upper()} balance is 0.0. Please deposit or switch currency."))
                 return
             balance = live_bal
         except Exception as e:
             print(neg_c(f"  ❌ Connection failed: {e}"))
-            print(yel_c("  Tip: Make sure Cloudflare cookies are updated in .bypass_cache.json or run with --mock"))
+            print(yel_c("  Tip: Check Cloudflare cookies in .bypass_cache.json or run with --mock"))
             return
+    else:
+        balance = float(args.balance)
+    auto_cal_base_bet   = cv("AUTO_CAL_BASE_BET",         1,     int) != 0
+    manual_base_bet     = cv("FUSION_MANUAL_BASE_BET",    cv("BASE_BET", 0.0001, float), float)
+    auto_cal_loss_mul   = cv("AUTO_CAL_LOSS_MUL",         1,     int) != 0
+    manual_loss_mul     = cv("FUSION_MANUAL_LOSS_MUL",    cv("LOSS_MUL", 1.05, float), float)
+    wager_chance        = cv("FUSION_WAGER_CHANCE",       98.0,  float)
+    wager_bet_percent   = cv("FUSION_WAGER_BET_PCT",      2.5,   float)
+    loss_cut_percent    = cv("FUSION_LOSS_CUT_PCT",       4.0,   float)
+    recover_profit_pct  = cv("FUSION_RECOVER_PROFIT_PCT", 1.0,   float)
+    wager_target        = cv("FUSION_WAGER_TARGET",       cv("WAGER_TARGET", 1000.0, float), float)
+    enable_wager_target = cv("FUSION_ENABLE_WAGER_TARGET", 1,    int) != 0
 
-    # ── Strategy Parameters (100% Alignment with fusion_bot.py) ───────────────
-    main_mode             = args.mode
-    auto_cal_base_bet     = _cv(cfg, "AUTO_CAL_BASE_BET", 1, int) != 0
-    manual_base_bet       = _cv(cfg, "FUSION_MANUAL_BASE_BET", 0.0001, float)
-    auto_cal_loss_mul     = _cv(cfg, "AUTO_CAL_LOSS_MUL", 1, int) != 0
-    manual_loss_mul       = _cv(cfg, "FUSION_MANUAL_LOSS_MUL", 1.05, float)
-    wager_chance          = _cv(cfg, "FUSION_WAGER_CHANCE", 98.0, float)
-    wager_bet_percent     = _cv(cfg, "FUSION_WAGER_BET_PCT", 2.5, float)
-    loss_cut_percent      = _cv(cfg, "FUSION_LOSS_CUT_PCT", 4.0, float)
-    recover_profit_pct    = _cv(cfg, "FUSION_RECOVER_PROFIT_PCT", 1.0, float)
-    wager_target          = _cv(cfg, "FUSION_WAGER_TARGET", 500.0, float)
-    enable_wager_target   = _cv(cfg, "FUSION_ENABLE_WAGER_TARGET", 1, int) != 0
+    auto_chance         = cv("FUSION_AUTO_CHANCE",        1,     int) != 0
+    chance_min          = cv("FUSION_CHANCE_MIN",         30.0,  float)
+    chance_max          = cv("FUSION_CHANCE_MAX",         40.0,  float)
+    chance_fixed        = cv("FUSION_CHANCE_FIXED",       0.5,   float)
+    random_on_win       = cv("FUSION_RANDOM_ON_WIN",      1,     int) != 0
+    random_on_lose      = cv("FUSION_RANDOM_ON_LOSE",     0,     int) != 0
 
-    auto_chance           = _cv(cfg, "FUSION_AUTO_CHANCE", 1, int) != 0
-    chance_min            = _cv(cfg, "FUSION_CHANCE_MIN", 0.5, float)
-    chance_max            = _cv(cfg, "FUSION_CHANCE_MAX", 18.0, float)
-    chance_fixed          = _cv(cfg, "FUSION_CHANCE_FIXED", 0.5, float)
-    random_on_win         = _cv(cfg, "FUSION_RANDOM_ON_WIN", 1, int) != 0
-    random_on_lose        = _cv(cfg, "FUSION_RANDOM_ON_LOSE", 0, int) != 0
-
-    risk_bonus_pct        = _cv(cfg, "FUSION_RISK_BONUS_PCT", 10.0, float)
-    house_edge            = _cv(cfg, "HE", 1.0, float)
-    auto_cal_allowed_loss = _cv(cfg, "AUTO_CAL_ALLOWED_LOSS", 1, int) != 0
-    risk_alpha            = _cv(cfg, "FUSION_RISK_ALPHA", 0.01, float)
-    manual_allowed_losses = _cv(cfg, "FUSION_ALLOWED_LOSSES", 700, int)
+    risk_bonus_pct        = cv("FUSION_RISK_BONUS_PCT",     10.0,  float)
+    house_edge            = cv("HE",                        1.0,   float)
+    auto_cal_allowed_loss = cv("AUTO_CAL_ALLOWED_LOSS", cv("FUSION_AUTO_CAL_ALLOWED_LOSS", 1, int), int) != 0
+    risk_alpha            = cv("FUSION_RISK_ALPHA", cv("RISK_ALPHA", 0.001, float), float)
+    manual_allowed_losses = cv("FUSION_ALLOWED_LOSSES",     14,    int)
     allowed_losses        = manual_allowed_losses
-    min_bet               = _cv(cfg, "FUSION_MIN_BET", 0.0001, float)
-    _vault_env            = _cv(cfg, "FUSION_ENABLE_VAULT", 0, int) != 0
-    enable_vault          = _vault_env if args.vault is None else (args.vault != 0)
-    stop_profit_ratio     = _cv(cfg, "FUSION_STOP_PROFIT", 1.0, float)
-    stop_loss_ratio       = _cv(cfg, "FUSION_STOP_LOSS", 0.0, float)
-    stop_max_streak       = _cv(cfg, "FUSION_STOP_LOSS_STREAK", 0, int)
+    min_bet               = cv("FUSION_MIN_BET",            0.00000001, float)
+    # Vault vs Compound mode
+    _vault_env = cv("FUSION_ENABLE_VAULT", 1, int) != 0
+    enable_vault = _vault_env if args.vault is None else (args.vault != 0)
+    stop_profit_ratio   = cv("FUSION_STOP_PROFIT",        0.2,   float)
+    stop_loss_ratio     = cv("FUSION_STOP_LOSS",          0.0,   float)
+    stop_max_streak     = cv("FUSION_STOP_LOSS_STREAK",   0,     int)
 
-    # ── Runtime State ─────────────────────────────────────────────────────────
+    # ── RUNTIME STATE ──────────────────────────────────────────────
     session_start_balance   = balance
     session_start_time      = time.time()
     total_bets              = 0
@@ -405,28 +721,74 @@ def main():
     )
 
     nextbet                 = 0.0
-    bethigh                 = True
+    bethigh                 = True  # Stake dice: High=True (Roll Over 100 - chance)
     stop_reason             = "max_rounds"
 
-    csv_paths = get_csv_paths()
+    csv_paths = get_csv_paths(args.csv)
     init_csv(csv_paths)
 
-    # ── State Transition Functions ────────────────────────────────────────────
+    # ── ROCK SOLID DUAL-LAYER TUI ENGINE ─────────────────────────
+    # Keeps HUD at bottom and streams roll lines above without jitter
+    hud_rendered_lines: int = 0
+    scroll_buffer: list[str] = []
+
+    def buffer_scroll(msg: str):
+        """Buffers an event or roll line for batch rendering above HUD."""
+        nonlocal scroll_buffer
+        if quiet:
+            return
+        scroll_buffer.append(msg)
+
+    def render_frame(hud_lines: list[str]):
+        """Atomic batch rendering: Repositions cursor, emits scroll items, then draws HUD."""
+        nonlocal hud_rendered_lines, scroll_buffer
+        if quiet:
+            return
+
+        out: list[str] = []
+        if hud_rendered_lines > 0:
+            out.append(f"\033[{hud_rendered_lines}A")
+
+        # Emit all buffered scroll lines cleanly (clearing line with \r\033[2K)
+        for msg in scroll_buffer:
+            out.append(f"\r\033[2K{msg}\n")
+        scroll_buffer.clear()
+
+        # Emit pinned HUD box
+        for line in hud_lines:
+            out.append(f"\r\033[2K{line}\n")
+
+        # Erase below if previous HUD was taller
+        diff = hud_rendered_lines - len(hud_lines)
+        if diff > 0:
+            out.append("\033[J")
+
+        sys.stdout.write("".join(out))
+        sys.stdout.flush()
+        hud_rendered_lines = len(hud_lines)
+
+    # ── HELPER FUNCTIONS ──────────────────────────────────────────
     def update_base(active_chance: float | None = None):
         nonlocal base_bet, divisor, allowed_losses
-        ref = active_chance if active_chance is not None else (chance_min if auto_chance else chance_fixed)
+        if active_chance is not None:
+            ref = active_chance
+        else:
+            ref = chance_min if auto_chance else chance_fixed
 
+        # 1. Allowed Losses (N)
         if auto_cal_allowed_loss:
             allowed_losses = solve_dynamic_allowed_losses(ref, risk_alpha)
         else:
             allowed_losses = manual_allowed_losses
 
+        # 2. Multiplier for Divisor
         use_he = (main_mode == 2)
         if auto_cal_loss_mul:
             eff_mul, _ = get_payout_and_multiplier(ref, risk_bonus_pct, use_he, house_edge)
         else:
             eff_mul = manual_loss_mul
 
+        # 3. Base Bet
         if auto_cal_base_bet:
             base_bet, divisor = solve_base_bet_with_mul(
                 cycle_start_balance, eff_mul, allowed_losses, min_bet
@@ -444,13 +806,19 @@ def main():
         if cp > 0:
             if enable_vault:
                 profit_vault += cp
+                buffer_scroll(f"  {pos_c('✅ Cycle Complete!')} Profit: {pos_c(f'{cp:.8f}')} │ 💎 Vault: {pos_c(f'{profit_vault:.8f}')}")
                 balance = original_cycle_balance
                 working_balance = balance
                 cycle_start_balance = original_cycle_balance
             else:
+                # Compound mode: keep full balance, update reference
                 original_cycle_balance = balance
                 cycle_start_balance = balance
                 working_balance = balance
+                buffer_scroll(f"  {pos_c('✅ Cycle Complete (Compound)!')} Profit: {pos_c(f'{cp:.8f}')} │ Balance: {pos_c(f'{balance:.8f}')}")
+        else:
+            buffer_scroll(f"  {yel_c('⚠️  Cycle ended without profit')} ({cp:.8f})")
+            working_balance = balance
 
     def switch_to_wager():
         nonlocal mode, loss_streak, consecutive_losses
@@ -468,6 +836,7 @@ def main():
         current_chance = wager_chance
         bethigh = True
         nextbet = max(wager_base_bet, min_bet)
+        buffer_scroll(f"  {pos_c('🟢 → WAGER MODE')} base_bet={yel_c(f'{wager_base_bet:.8f}')} chance={cya_c(f'{wager_chance:.2f}%')}")
 
     def switch_to_profit():
         nonlocal mode, loss_streak, consecutive_losses
@@ -485,185 +854,355 @@ def main():
             current_chance = chance_fixed
 
         update_base(current_chance)
+
+        use_he = (main_mode == 2)
+        if auto_cal_loss_mul:
+            eff_mul, payout = get_payout_and_multiplier(
+                current_chance, risk_bonus_pct, use_he, house_edge
+            )
+        else:
+            eff_mul = manual_loss_mul
         bethigh = True
         nextbet = max(base_bet, min_bet)
+        buffer_scroll(f"  {yel_c('🟡 → PROFIT MODE')} base={yel_c(f'{base_bet:.8f}')} chance={cya_c(f'{current_chance:.2f}%')} N={allowed_losses} mul={eff_mul:.4f}x")
 
-    # ── Initialize State ──────────────────────────────────────────────────────
+    def roll_stake_dice(chance_pct: float, high: bool = True) -> tuple[float, bool, float]:
+        """
+        Simulate real Stake Dice:
+          Roll: 0.00 to 99.99
+          Target when High=True (Roll Over): target = 100.0 - chance_pct
+          Win if roll >= target
+          Payout: (1 - house_edge/100) / (chance_pct/100)
+        """
+        roll = round(random.uniform(0.00, 99.99), 2)
+        if high:
+            target = round(100.0 - chance_pct, 2)
+            won = roll >= target
+        else:
+            target = round(chance_pct, 2)
+            won = roll < target
+
+        cd = max(0.0001, min(0.9999, chance_pct / 100.0))
+        payout = (1.0 - house_edge / 100.0) / cd
+        if payout <= 1.0:
+            payout = 1.0001
+        return roll, won, payout
+
+    # ── STARTUP BANNER ─────────────────────────────────────────────
     update_base()
     if main_mode == 1:
         switch_to_wager()
     else:
         switch_to_profit()
 
-    # ── Startup Banner ────────────────────────────────────────────────────────
-    W = 74
-    print(cn(51, "═" * W, True))
-    print(cn(255, f"  💎 FUSION BOT NATIVE — {'🔥 LIVE REAL-MONEY' if is_live else '🎲 MOCK DRY-RUN'} ENGINE", True))
-    print(cn(51, "═" * W, True))
-    print(f"  Config Path    : {_wc(str(env_file_path))} {_gr('(SSOT)')}")
-    print(f"  Target         : {_wc('STAKE DIRECT API' if is_live else 'LOCAL SIMULATOR')}  │  Currency: {_wc(currency.upper())}")
-    print(f"  Strategy       : {pos_c('WAGER FOCUS + RECOVERY') if main_mode == 1 else yel_c('PROFIT FOCUS')}")
-    vault_desc = "Enabled (Vault & Reset)" if enable_vault else "Disabled (Compound All Bal)"
-    print(f"  Starting Bal   : {_wc(f'{session_start_balance:.8f}')}  │  Vault: {_wc(vault_desc)}")
-    base_desc = "Auto (Dynamic)" if auto_cal_base_bet else f"Manual ({manual_base_bet:.8f})"
-    mul_desc = f"Auto (Bonus {risk_bonus_pct:.1f}%)" if auto_cal_loss_mul else f"Manual ({manual_loss_mul:.4f}x)"
-    print(f"  Base Bet Mode  : {_wc(base_desc)}  │  Multiplier: {_wc(mul_desc)}")
-    loss_info = f"Auto (Risk {risk_alpha*100:.2f}%)" if auto_cal_allowed_loss else f"Fixed ({allowed_losses})"
-    print(f"  Allowed Losses : {_wc(loss_info)}  │  Stop Profit: {pos_c(f'{stop_profit_ratio*100:.1f}%')}")
-    print(f"  Chance Range   : {_wc(f'{chance_min:.2f}% - {chance_max:.2f}%')}  │  Min Bet: {_wc(f'{min_bet:.8f}')}")
-    print(f"  Live Log File  : {_gr('logs/dice_session_real.csv')} {_cya('(Projectable by Live HUD)') if False else ''}")
-    print(cn(240, "  💡 Press Ctrl+C or type 'q' + Enter at any time to stop"))
-    print(cn(51, "═" * W, True))
-    print()
+    if not quiet:
+        print(cn(51, "═" * 74, True))
+        print(cn(255, "  💎 FUSION BOT v4.1 — Real Simulation Engine (fusion_bot_gamblerbot.py)", True))
+        print(cn(51, "═" * 74, True))
+        base_desc = "Auto (Dynamic)" if auto_cal_base_bet else f"Manual ({manual_base_bet:.8f})"
+        mul_desc = f"Auto (Bonus {risk_bonus_pct:.1f}%)" if auto_cal_loss_mul else f"Manual ({manual_loss_mul:.4f}x)"
+        loss_info = f"Auto (Risk {risk_alpha*100:.2f}%)" if auto_cal_allowed_loss else f"Fixed ({allowed_losses})"
+        vault_desc = "Enabled (Vault & Reset)" if enable_vault else "Disabled (Compound All Bal)"
+        print(f"  Strategy       : {pos_c('WAGER FOCUS + RECOVERY') if main_mode == 1 else yel_c('PROFIT FOCUS')}")
+        print(f"  Starting Bal   : {_wc(f'{session_start_balance:.8f}')}  │  Vault: {_wc(vault_desc)}")
+        print(f"  Base Bet Mode  : {_wc(base_desc)}  │  Multiplier: {_wc(mul_desc)}")
+        print(f"  Loss Cut Pct   : {neg_c(f'{loss_cut_percent:.2f}%')}  │  Recover Pct: {yel_c(f'{recover_profit_pct:.2f}%')}")
+        print(f"  Allowed Losses : {_wc(loss_info)}  │  Stop Profit: {pos_c(f'{stop_profit_ratio*100:.1f}%')}")
+        print(f"  Roll Delay     : {_wc(f'{round_delay}s')}  │  Max Rounds: {_wc(str(max_rounds))}")
+        print(cn(240, "  💡 Press Ctrl+C or type 'q' + Enter at any time to stop"))
+        print(cn(51, "═" * 74, True))
+        print()
 
-    # Stdin listener thread
-    threading.Thread(target=_stdin_watcher, daemon=True).start()
+    # Terminal stdin listener for interactive stop
+    if not quiet and sys.stdin.isatty():
+        w_thread = threading.Thread(target=_stdin_watcher, daemon=True)
+        w_thread.start()
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # BETTING ENGINE LOOP
-    # ─────────────────────────────────────────────────────────────────────────
-    try:
-        while total_bets < args.rounds and not _user_stop:
-            total_bets += 1
-            current_bet = nextbet
-            current_roll_chance = current_chance
-            current_high = bethigh
-            total_wagered += current_bet
+    # ─────────────────────────────────────────────────────────────
+    # SIMULATION LOOP (Runs round by round)
+    # ─────────────────────────────────────────────────────────────
+    for rnd in range(1, max_rounds + 1):
+        if _user_stop:
+            stop_reason = "USER_STOP"
+            break
 
-            # Execute Roll
-            if is_live and client:
-                res = client.place_dice_bet(
-                    amount=current_bet,
-                    chance=current_roll_chance,
-                    high=current_high,
-                    currency=currency,
-                )
-                roll_val = res["roll_val"]
-                won = res["won"]
-                round_pnl = res["round_pnl"]
-                balance = res["balance"]
-                payout = res["payout"] / current_bet if current_bet > 0 else 0.0
+        total_bets += 1
+        current_bet = nextbet
+        current_roll_chance = current_chance
+        current_high = bethigh
+        total_wagered += current_bet
+
+        # Roll Dice on Stake (Live API or Mock Simulation)
+        if is_live and client:
+            res = client.place_dice_bet(
+                amount=current_bet,
+                chance=current_roll_chance,
+                high=current_high,
+                currency=currency,
+            )
+            roll_val = res["roll_val"]
+            won = res["won"]
+            round_pnl = res["round_pnl"]
+            balance = res["balance"]
+            payout = (res["payout"] / current_bet) if current_bet > 0 else 0.0
+        else:
+            roll_val, won, payout = roll_stake_dice(current_roll_chance, current_high)
+            if won:
+                round_pnl = current_bet * (payout - 1.0)
             else:
-                roll_val, won, payout = roll_stake_dice_mock(current_roll_chance, current_high, house_edge)
-                if won:
-                    round_pnl = current_bet * (payout - 1.0)
-                else:
-                    round_pnl = -current_bet
-                balance += round_pnl
+                round_pnl = -current_bet
+            balance += round_pnl
+        working_balance = balance
+        net_pnl = (profit_vault + (balance - original_cycle_balance)) if enable_vault else (balance - session_start_balance)
 
-            # Calculate logs
+        # ── WIN BRANCH ───────────────────────────────────────────
+        if won:
+            win_count += 1
+            loss_streak = 0
+            consecutive_losses = 0
+
+            if mode == "WAGER":
+                nextbet = max(wager_base_bet, min_bet)
+                current_chance = wager_chance
+
+                # Target reached check
+                if main_mode == 1 and enable_wager_target and total_wagered >= wager_target:
+                    buffer_scroll(f"  {cya_c('🎯 Wager Target')} {wager_target:.2f} reached!")
+                    separate_profit_reset()
+                    stop_reason = "WAGER_TARGET_REACHED"
+                    _user_stop = True
+
+            else:  # PROFIT mode WIN
+                if auto_chance and random_on_win:
+                    current_chance = random_chance(chance_min, chance_max)
+                else:
+                    current_chance = chance_fixed
+
+                update_base(current_chance)
+                nextbet = max(base_bet, min_bet)
+
+                # Mode 1 recovery check
+                if main_mode == 1:
+                    need = wager_loss_amount + (original_cycle_balance * recover_profit_pct / 100.0)
+                    gain = balance - profit_cycle_start
+                    if gain >= need:
+                        buffer_scroll(f"  {pos_c('✅ Recovery WIN')} gain={pos_c(f'{gain:+.8f}')} (needed {need:.8f})")
+                        separate_profit_reset()
+                        switch_to_wager()
+                elif main_mode == 2:
+                    cp = balance - original_cycle_balance
+                    if cp > 0:
+                        separate_profit_reset()
+                        update_base(current_chance)
+                        nextbet = max(base_bet, min_bet)
+
+        # ── LOSE BRANCH ──────────────────────────────────────────
+        else:
+            lose_count += 1
+            loss_streak += 1
+            consecutive_losses += 1
+            if loss_streak > max_loss_streak:
+                max_loss_streak = loss_streak
+
+            if mode == "WAGER":
+                cycle_loss = wager_cycle_start - balance
+                loss_pct = cycle_loss / wager_cycle_start * 100.0 if wager_cycle_start > 0 else 0.0
+
+                if main_mode == 1 and loss_pct >= loss_cut_percent:
+                    wager_loss_amount = cycle_loss
+                    buffer_scroll(f"  {neg_c('⚠️  Loss Cut')} {loss_pct:.2f}% (loss: {cycle_loss:.8f}) → SWITCH TO PROFIT")
+                    switch_to_profit()
+                else:
+                    nextbet = max(wager_base_bet, min_bet)
+                    current_chance = wager_chance
+
+            else:  # PROFIT mode LOSE
+                if auto_chance and random_on_lose:
+                    current_chance = random_chance(chance_min, chance_max)
+
+                use_he = (main_mode == 2)
+                if auto_cal_loss_mul:
+                    mul, _ = get_payout_and_multiplier(
+                        current_chance, risk_bonus_pct, use_he, house_edge
+                    )
+                else:
+                    mul = manual_loss_mul
+                new_bet = current_bet * mul
+                if new_bet > balance:
+                    new_bet = balance * 0.9
+
+                nextbet = max(new_bet, min_bet)
+
+                if consecutive_losses >= allowed_losses:
+                    buffer_scroll(f"  {ora_c('⛔')} {allowed_losses} losses reached → reset base bet")
+                    update_base(current_chance)
+                    consecutive_losses = 0
+                    nextbet = max(base_bet, min_bet)
+
+                if main_mode == 1:
+                    need = wager_loss_amount + (original_cycle_balance * recover_profit_pct / 100.0)
+                    gain = balance - profit_cycle_start
+                    if gain >= need:
+                        buffer_scroll(f"  {pos_c('✅ Recovery on Loss')} gain={pos_c(f'{gain:+.8f}')}")
+                        separate_profit_reset()
+                        switch_to_wager()
+
+        # Enforce minimum bet
+        if nextbet < min_bet:
+            nextbet = min_bet
+
+        # ── STOP RULES ───────────────────────────────────────────
+        total_pnl = (profit_vault + (balance - original_cycle_balance)) if enable_vault else (balance - session_start_balance)
+        profit_ratio = total_pnl / session_start_balance if session_start_balance > 0 else 0.0
+
+        if stop_profit_ratio > 0 and profit_ratio >= stop_profit_ratio:
+            buffer_scroll(f"  {pos_c('🎉 Profit Target Hit!')} ({profit_ratio * 100:.1f}% >= {stop_profit_ratio * 100:.1f}%)")
+            separate_profit_reset()
+            stop_reason = "PROFIT_TARGET_HIT"
+            _user_stop = True
+
+        elif stop_loss_ratio > 0 and profit_ratio <= -stop_loss_ratio:
+            buffer_scroll(f"  {neg_c('🚨 Loss Limit Hit!')} ({profit_ratio * 100:.1f}%)")
+            stop_reason = "LOSS_LIMIT_HIT"
+            _user_stop = True
+
+        elif stop_max_streak > 0 and loss_streak >= stop_max_streak:
+            buffer_scroll(f"  {neg_c('🚨 Max Streak Hit!')} ({loss_streak})")
+            stop_reason = "MAX_STREAK_HIT"
+            _user_stop = True
+
+        elif balance < min_bet * 2:
+            buffer_scroll(f"  {neg_c('🚨 Busted: Balance too low!')} ({balance:.8f})")
+            stop_reason = "BUSTED"
+            _user_stop = True
+
+        # ── CSV LOGGING ──────────────────────────────────────────
+        cd_log = max(0.0001, min(0.9999, current_roll_chance / 100.0))
+        payout_log = (1.0 - house_edge / 100.0) / cd_log
+        if mode == "WAGER":
+            mul_log = 1.0
+        else:
             use_he = (main_mode == 2)
             if auto_cal_loss_mul:
-                mul_log, payout_log = get_payout_and_multiplier(
+                mul_log, _ = get_payout_and_multiplier(
                     current_roll_chance, risk_bonus_pct, use_he, house_edge
                 )
             else:
                 mul_log = manual_loss_mul
-                payout_log = (1.0 - house_edge / 100.0) / (current_roll_chance / 100.0)
 
-            total_pnl = (balance + profit_vault) - session_start_balance
+        log_csv_row(
+            csv_paths, rnd, mode, "win" if won else "lose",
+            roll_val, current_bet, round_pnl, total_pnl, balance,
+            loss_streak, profit_vault, consecutive_losses,
+            current_roll_chance, payout_log, mul_log
+        )
 
-            # State Updates
-            if won:
-                win_count += 1
-                loss_streak = 0
-                consecutive_losses = 0
-
-                if mode == "WAGER":
-                    nextbet = max(wager_base_bet, min_bet)
-                else:
-                    # Profit Mode Win: check cycle completion
-                    cp = balance - original_cycle_balance
-                    if cp > 0:
-                        separate_profit_reset()
-                        if main_mode == 1:
-                            switch_to_wager()
-                        else:
-                            switch_to_profit()
-                    else:
-                        nextbet = max(base_bet, min_bet)
-
-                    if auto_chance and random_on_win:
-                        current_chance = random_chance(chance_min, chance_max)
-                        update_base(current_chance)
-                        nextbet = max(base_bet, min_bet)
-
-            else:  # Lose
-                lose_count += 1
-                loss_streak += 1
-                consecutive_losses += 1
-                if loss_streak > max_loss_streak:
-                    max_loss_streak = loss_streak
-
-                if mode == "WAGER":
-                    wager_loss_amount += current_bet
-                    cum_loss_pct = (wager_loss_amount / wager_cycle_start * 100.0) if wager_cycle_start > 0 else 0.0
-                    if cum_loss_pct >= loss_cut_percent:
-                        switch_to_profit()
-                    else:
-                        nextbet = max(wager_base_bet, min_bet)
-                else:
-                    # Profit Mode Lose: Martingale multiplication
-                    if auto_chance and random_on_lose:
-                        current_chance = random_chance(chance_min, chance_max)
-
-                    if auto_cal_loss_mul:
-                        eff_mul, _ = get_payout_and_multiplier(
-                            current_chance, risk_bonus_pct, use_he, house_edge
-                        )
-                    else:
-                        eff_mul = manual_loss_mul
-
-                    nextbet = max(current_bet * eff_mul, min_bet)
-
-            # Safety Stop Checks
-            roi_pct = (total_pnl / session_start_balance) if session_start_balance > 0 else 0.0
-            if stop_profit_ratio > 0 and roi_pct >= stop_profit_ratio:
-                stop_reason = "STOP_PROFIT"
-                break
-            if stop_loss_ratio > 0 and roi_pct <= -stop_loss_ratio:
-                stop_reason = "STOP_LOSS"
-                break
-            if stop_max_streak > 0 and loss_streak >= stop_max_streak:
-                stop_reason = "STOP_MAX_STREAK"
-                break
-            if nextbet > balance:
-                stop_reason = "INSUFFICIENT_BALANCE"
-                break
-
-            # CSV Stream (Real-Time HUD feed)
-            log_csv_row(
-                csv_paths, total_bets, mode, "win" if won else "lose",
-                roll_val, current_bet, round_pnl, total_pnl, balance,
-                loss_streak, profit_vault, consecutive_losses,
-                current_roll_chance, payout_log, mul_log
-            )
-
-            # Terminal Roll Output
+        # ── ATOMIC DUAL-LAYER TUI FRAME (Zero Jitter / Zero Flicker)
+        if not quiet:
             tag = pos_c("🏆 WIN ") if won else neg_c("💀 LOSE")
             pnl_disp = pos_c(f"+{round_pnl:11.8f}") if round_pnl >= 0 else neg_c(f"{round_pnl:11.8f}")
-            mode_tag = yel_c("[P]") if mode == "PROFIT" else pos_c("[W]")
-            ts = time.strftime("%H:%M:%S")
-            print(f"{_gr(ts)} {mode_tag} #{total_bets:<5d} {tag} Roll: {roll_val:5.2f} │ Bet: {current_bet:11.8f} │ PnL: {pnl_disp} │ Bal: {_wc(f'{balance:11.8f}')}")
 
-            if args.delay > 0:
-                time.sleep(args.delay)
+            # Strictly 68 visible characters (never line-wraps on 80+ column terminal)
+            roll_line = (
+                f"  [{_wc(f'#{rnd:<5d}')}] {tag} │ Roll: {_wc(f'{roll_val:5.2f}')} │ "
+                f"Bet: {yel_c(f'{current_bet:11.8f}')} │ PnL: {pnl_disp}"
+            )
+            buffer_scroll(roll_line)
 
-    except KeyboardInterrupt:
-        stop_reason = "USER_INTERRUPT"
-    finally:
-        print(cn(51, "\n" + "═" * W, True))
-        print(cn(255, f"  💎 FUSION NATIVE — SESSION COMPLETE [{stop_reason.upper()}]", True))
-        print(cn(51, "═" * W, True))
-        print(f"  Final Balance : {_wc(f'{balance:14.8f}')} {currency.upper()}")
-        print(f"  Profit Vault  : {pos_c(f'{profit_vault:+14.8f}')}")
-        tot_final_pnl = (balance + profit_vault) - session_start_balance
-        pnl_fn = pos_c if tot_final_pnl >= 0 else neg_c
-        print(f"  Net Total PnL : {pnl_fn(f'{tot_final_pnl:+14.8f}')} (ROI: {pnl_fn(f'{tot_final_pnl/session_start_balance*100:+.2f}%')})")
-        print(f"  Win / Loss    : {pos_c(str(win_count))} W  /  {neg_c(str(lose_count))} L  ({win_count/max(1, total_bets)*100:.2f}%)")
-        print(f"  Max Streak    : {neg_c(str(max_loss_streak))} consecutive losses")
-        print(f"  Logged to     : {_gr('logs/dice_session_real.csv')}")
-        print(cn(51, "═" * W, True))
+            # Build fixed 11-line pinned HUD
+            rt = time.time() - session_start_time
+            if mode == "WAGER":
+                cur_lpct = max(0.0, (wager_cycle_start - balance) / wager_cycle_start * 100.0) if wager_cycle_start > 0 else 0.0
+            else:
+                cur_lpct = 0.0
+
+            need_r = wager_loss_amount + original_cycle_balance * recover_profit_pct / 100.0
+            gain_r = balance - profit_cycle_start
+
+            cd_next = max(0.0001, min(0.9999, current_chance / 100.0))
+            payout_next = (1.0 - house_edge / 100.0) / cd_next
+            if mode == "WAGER":
+                mul_next = 1.0
+            else:
+                use_he = (main_mode == 2)
+                if auto_cal_loss_mul:
+                    mul_next, _ = get_payout_and_multiplier(
+                        current_chance, risk_bonus_pct, use_he, house_edge
+                    )
+                else:
+                    mul_next = manual_loss_mul
+
+            hud_box = build_pinned_hud(
+                rnd=rnd, max_rnd=max_rounds, mode=mode, main_mode=main_mode,
+                balance=balance, start_balance=session_start_balance,
+                profit_vault=profit_vault, total_profit=total_pnl,
+                next_bet=nextbet, next_chance=current_chance,
+                next_payout=payout_next, next_loss_mul=mul_next,
+                win_count=win_count, lose_count=lose_count,
+                loss_streak=loss_streak, max_loss_streak=max_loss_streak,
+                total_wagered=total_wagered, wager_target=wager_target,
+                allowed_losses=allowed_losses, consecutive_losses=consecutive_losses,
+                loss_cut_pct=loss_cut_percent, current_loss_pct=cur_lpct,
+                runtime=rt, recover_needed=need_r, current_gain=gain_r,
+                enable_vault=enable_vault
+            )
+            render_frame(hud_box)
+
+        if round_delay > 0:
+            time.sleep(round_delay)
+
+        if _user_stop:
+            break
+
+    # ─────────────────────────────────────────────────────────────
+    # CLEANUP HUD & SHOW FINAL SUMMARY
+    # ─────────────────────────────────────────────────────────────
+    if not quiet and hud_rendered_lines > 0:
+        sys.stdout.write(f"\033[{hud_rendered_lines}A\033[J")
+        sys.stdout.flush()
+
+    runtime = time.time() - session_start_time
+    total_pnl_final = (profit_vault + (balance - original_cycle_balance)) if enable_vault else (balance - session_start_balance)
+
+    if quiet:
+        import json
+        res = {
+            "rounds": total_bets,
+            "stop_reason": stop_reason,
+            "start_balance": session_start_balance,
+            "final_balance": balance,
+            "profit_vault": profit_vault,
+            "total_profit": total_pnl_final,
+            "win_count": win_count,
+            "lose_count": lose_count,
+            "max_loss_streak": max_loss_streak,
+            "total_wagered": total_wagered,
+            "runtime_s": runtime,
+        }
+        print(f"__RESULT_JSON__{json.dumps(res)}__RESULT_JSON__")
+        return
+
+    W = 74
+    pnl_color = pos_c if total_pnl_final >= 0 else neg_c
+    roi_pct = total_pnl_final / session_start_balance * 100.0 if session_start_balance > 0 else 0.0
+
+    print()
+    print(cn(51, "═" * W, True))
+    print(cn(255, f"  💎 FUSION BOT v4.1 — SIMULATION SUMMARY  [{stop_reason.upper()}]", True))
+    print(cn(51, "═" * W, True))
+    print(f"  Strategy      : {pos_c('WAGER FOCUS+RECOVERY') if main_mode == 1 else yel_c('PROFIT FOCUS')}")
+    print(f"  Total Rounds  : {_wc(f'{total_bets:,}')} / {max_rounds:,}")
+    print(f"  Runtime       : {_wc(f'{runtime:.2f}s')} ({total_bets / max(0.001, runtime):.1f} rolls/sec)")
+    print(f"  Start Balance : {session_start_balance:14.8f}")
+    print(f"  Final Balance : {_wc(f'{balance:14.8f}')}")
+    print(f"  Profit Vault  : {pos_c(f'{profit_vault:+14.8f}')}")
+    print(f"  Net Total PnL : {pnl_color(f'{total_pnl_final:+14.8f}')} (ROI: {pnl_color(f'{roi_pct:+.2f}%')})")
+    print(f"  Win / Loss    : {pos_c(str(win_count))} W  /  {neg_c(str(lose_count))} L  ({win_count / max(1, total_bets) * 100:.2f}%)")
+    print(f"  Max Streak    : {neg_c(str(max_loss_streak))} consecutive losses")
+    print(f"  Total Wagered : {cya_c(f'{total_wagered:.4f}')} / {wager_target:.2f}")
+    print(f"  Session CSV   : {_gr(str(csv_paths[0]))}")
+    print(cn(51, "═" * W, True))
+
 
 if __name__ == "__main__":
-    main()
+    run_simulation()
