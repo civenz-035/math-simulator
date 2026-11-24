@@ -2,6 +2,7 @@
 # 💎 FUSION BOT v4.1 — Gambler.Bot / IronPython Edition
 # Ported from DICE.lua (แบบ A: แยก Profit + Reset Balance)
 # stake_api_key=522fe34470a71f0662cfc2ec39b887f54e34459125cdc8ed646b366f7a997635d9a75e03b162df944ceaa9cc644be544
+#stake_api_key2=f7ae776edfdd1328955f2f7e3fb00ffaa354ac72d5dec618cf3abab09afcb31cae27a784886c162869623193d949618a
 # ==============================================================================
 # Architecture: IronPython compatible (Gambler.Bot 5.35+)
 #   - No argparse, no pathlib, no f-strings with complex expressions

@@ -90,7 +90,10 @@ gameble(){
 				;;
 		-c|--config)
 				micro "$sim/config/fusion.env"
-				;;		
+				;;
+		-h|--help)
+				d-start_help
+				;;				
 	esac				
 }
 alias gbb='gameble' 
