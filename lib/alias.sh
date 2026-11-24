@@ -83,18 +83,28 @@ gameble(){
 
 	case "$1" in
 		-t|--test) 
-				py $sim/bin/fusion_bot.py
+				shift
+				py $sim/bin/fusion_bot.py "$@"
+				;;
+		-n|--native|-s|--standalone)
+				shift
+				py $sim/bin/fusion_native.py "$@"
 				;;
 		-d|--dashboard)
-				py $sim/bin/fusion_live_hud.py
+				shift
+				py $sim/bin/fusion_live_hud.py "$@"
 				;;
 		-c|--config)
 				micro "$sim/config/fusion.env"
 				;;
 		-h|--help)
 				d-start_help
-				;;				
+				;;
+		*)
+				py $sim/bin/fusion_live_hud.py "$@"
+				;;
 	esac				
 }
 alias gbb='gameble' 
+alias gmm='gameble' 
 

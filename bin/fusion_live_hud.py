@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════════════════════════════╗
-║  💎 FUSION BOT v4.1 — Real-Time Live Terminal Dashboard          ║
-║  Tails logs/dice_session_latest.csv from Gambler.Bot in real-time║
+║  💎 FUSION BOT v4.2 — Real-Time Live Terminal Dashboard          ║
+║  Real Gambler.Bot & Local Simulator Live Projection Monitor      ║
 ║  Live ANSI Box HUD · Equity Curve · Milestone Stream · SSOT      ║
 ╚══════════════════════════════════════════════════════════════════╝
 
 Usage:
-  python bin/fusion_live_hud.py
-  python bin/fusion_live_hud.py --history 12
-  python bin/fusion_live_hud.py --csv logs/dice_session_latest.csv
+  python bin/fusion_live_hud.py                  # Interactive selector (Real / Sim / Auto)
+  python bin/fusion_live_hud.py real             # Direct projection to Real Gambler.Bot
+  python bin/fusion_live_hud.py sim              # Direct projection to Simulator (fusion_bot.py)
+  python bin/fusion_live_hud.py auto             # Auto-detect latest active session
+  python bin/fusion_live_hud.py -t real -n 12    # Flag syntax with 12 history rows
+  python bin/fusion_live_hud.py --sim            # Shortcut flag for simulator
+  python bin/fusion_live_hud.py --csv path.csv   # Custom CSV file path
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from pathlib import Path
 import re
 import signal
 import sys
+import threading
 import time
 import unicodedata
 
@@ -31,6 +36,13 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8", errors="replace")
     except (AttributeError, ValueError):
         pass
+
+# ── Windows non-blocking keyboard support ───────────────────────────────────
+try:
+    import msvcrt
+    HAS_MSVCRT = True
+except ImportError:
+    HAS_MSVCRT = False
 
 # ── ANSI Color Helpers (identical to roll.py & fusion_bot.py) ───────────────
 def cn(code: int, text: str, bold: bool = False) -> str:
@@ -81,8 +93,10 @@ def progress_bar(val: float, total: float, width: int = 16) -> str:
     bar = "█" * filled + "░" * (width - filled)
     return f"[{bar}] {pct*100:5.1f}%"
 
-# ── Graceful Stop ────────────────────────────────────────────────────────────
+# ── Graceful Stop & Command Switch ──────────────────────────────────────────
 _user_stop = False
+_target_switch: str | None = None
+
 def _handle_sigint(sig, frame):
     global _user_stop
     _user_stop = True
@@ -137,42 +151,172 @@ def _gv(cfg: dict[str, str], key: str, default, cast_type=str):
     except Exception:
         return default
 
-# ── CSV Path Locator ─────────────────────────────────────────────────────────
-def find_csv_file(repo_root: Path, custom_path: str | None = None) -> Path:
+# ── Target Resolution & CSV Path Locator ─────────────────────────────────────
+def normalize_target_name(t: str | None) -> str:
+    if not t:
+        return "real"
+    t_low = t.strip().lower()
+    if t_low in ("1", "real", "bot", "gamblerbot", "gbb", "live"):
+        return "real"
+    if t_low in ("2", "sim", "simu", "simulator", "fusion_bot", "test"):
+        return "sim"
+    if t_low in ("3", "auto", "detect", "latest"):
+        return "auto"
+    return "real"
+
+def resolve_target_file(repo_root: Path, target_norm: str, custom_path: str | None = None) -> tuple[Path, str, str]:
+    """
+    Resolves the target CSV file and returns: (path, display_badge, short_label)
+    """
     if custom_path:
-        return Path(custom_path)
-    candidates = [
-        repo_root / "logs" / "dice_session_latest.csv",
+        p = Path(custom_path)
+        return p, f"📄 CUSTOM [{p.name}]", "CUSTOM"
+
+    logs_dir = repo_root / "logs"
+
+    real_candidates = [
+        logs_dir / "dice_session_real.csv",
+        logs_dir / "dice_session_gamblerbot.csv",
+        repo_root.parent / "logs" / "dice_session_real.csv",
+        Path(r"c:\Users\User\simulator\logs\dice_session_real.csv"),
+    ]
+
+    sim_candidates = [
+        logs_dir / "dice_session_sim.csv",
+        repo_root.parent / "logs" / "dice_session_sim.csv",
+        Path(r"c:\Users\User\simulator\logs\dice_session_sim.csv"),
+    ]
+
+    latest_candidates = [
+        logs_dir / "dice_session_latest.csv",
         repo_root.parent / "logs" / "dice_session_latest.csv",
         Path.cwd() / "logs" / "dice_session_latest.csv",
-        Path.cwd() / "dice_session_latest.csv",
         Path(r"c:\Users\User\simulator\logs\dice_session_latest.csv"),
     ]
-    for c in candidates:
-        if c.is_file():
-            return c
-    return candidates[0]
+
+    if target_norm == "real":
+        for c in real_candidates:
+            if c.is_file():
+                return c, "🤖 GAMBLER.BOT [REAL]", "REAL"
+        for c in latest_candidates:
+            if c.is_file():
+                return c, "🤖 GAMBLER.BOT [REAL*]", "REAL"
+        return real_candidates[0], "🤖 GAMBLER.BOT [REAL]", "REAL"
+
+    elif target_norm == "sim":
+        for c in sim_candidates:
+            if c.is_file():
+                return c, "🎲 FUSION SIMU [SIM]", "SIM"
+        for c in latest_candidates:
+            if c.is_file():
+                return c, "🎲 FUSION SIMU [SIM*]", "SIM"
+        return sim_candidates[0], "🎲 FUSION SIMU [SIM]", "SIM"
+
+    else:  # auto
+        all_existing: list[tuple[float, Path, str]] = []
+        for c in real_candidates:
+            if c.is_file():
+                try: all_existing.append((c.stat().st_mtime, c, "REAL"))
+                except OSError: pass
+        for c in sim_candidates:
+            if c.is_file():
+                try: all_existing.append((c.stat().st_mtime, c, "SIM"))
+                except OSError: pass
+        for c in latest_candidates:
+            if c.is_file():
+                try: all_existing.append((c.stat().st_mtime, c, "LATEST"))
+                except OSError: pass
+
+        if all_existing:
+            all_existing.sort(key=lambda x: x[0], reverse=True)
+            _, best_p, kind = all_existing[0]
+            if kind == "REAL":
+                return best_p, "⚡ AUTO [REAL BOT]", "REAL"
+            elif kind == "SIM":
+                return best_p, "⚡ AUTO [SIMULATOR]", "SIM"
+            else:
+                return best_p, "⚡ AUTO [LATEST CSV]", "AUTO"
+
+        return latest_candidates[0], "⚡ AUTO [WAITING]", "AUTO"
+
+def prompt_target_selection() -> str:
+    """Interactive TTY target selection menu."""
+    sys.stdout.write("\033[2J\033[H")
+    sys.stdout.flush()
+    W = 68
+    print(header_line(cn(51, "💎 FUSION BOT v4.2 — Select Live Dashboard Target", True), W + 2))
+    print(pad_line(f"Choose which instance to project live dashboard to:", W))
+    print(pad_line("─" * W, W))
+    print(pad_line(f"  {yel_c('[1]')} {pos_c('🤖 Gambler.Bot (Real / External Bot)')}", W))
+    print(pad_line(f"      Source: logs/dice_session_real.csv", W))
+    print(pad_line(f"  {yel_c('[2]')} {cya_c('🎲 Fusion Simu (Simulator: bin/fusion_bot.py)')}", W))
+    print(pad_line(f"      Source: logs/dice_session_sim.csv", W))
+    print(pad_line(f"  {yel_c('[3]')} {pur_c('⚡ Auto-Detect (Latest Active Session)')}", W))
+    print(pad_line("─" * W, W))
+    print(pad_line(f"Tip: You can switch live anytime with keys {yel_c('[1]')}, {yel_c('[2]')}, {yel_c('[3]')}", W))
+    print(footer_line(W + 2))
+
+    try:
+        ans = input(cn(51, "\n  Select Target [1/2/3] (Press Enter for [1] Real Bot): ", True)).strip()
+    except (EOFError, KeyboardInterrupt):
+        return "real"
+
+    if ans in ("2", "sim", "s", "simu"):
+        return "sim"
+    elif ans in ("3", "auto", "a"):
+        return "auto"
+    return "real"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN HUD MONITOR
 # ══════════════════════════════════════════════════════════════════════════════
 def main():
+    global _user_stop, _target_switch
     repo_root = Path(__file__).resolve().parent.parent
-    parser = argparse.ArgumentParser(description="FUSION BOT Live ANSI Dashboard")
-    parser.add_argument("--csv", type=str, default=None, help="Path to dice_session_latest.csv")
-    parser.add_argument("--history", "-n", type=int, default=10, help="Number of recent bets to show in live stream (default: 10)")
+
+    parser = argparse.ArgumentParser(description="💎 FUSION BOT Live ANSI Dashboard")
+    parser.add_argument("target_pos", nargs="?", default=None,
+                        help="Target mode: 'real' (Gambler.Bot), 'sim' (fusion_bot.py), or 'auto'")
+    parser.add_argument("--target", "-t", type=str, default=None,
+                        help="Target mode: 'real', 'sim', or 'auto'")
+    parser.add_argument("--real", action="store_true", help="Monitor Gambler.Bot (Real)")
+    parser.add_argument("--sim", action="store_true", help="Monitor Fusion Simu (Simulator)")
+    parser.add_argument("--auto", action="store_true", help="Auto-detect latest active session")
+    parser.add_argument("--csv", type=str, default=None, help="Explicit path to dice session CSV")
+    parser.add_argument("--history", "-n", type=int, default=10,
+                        help="Number of recent bets to show in live stream (default: 10)")
     args = parser.parse_args()
 
     max_milestones = max(4, min(30, args.history))
 
+    # Resolve target from flags or interactive prompt
+    explicit_target: str | None = None
+    if args.real:
+        explicit_target = "real"
+    elif args.sim:
+        explicit_target = "sim"
+    elif args.auto:
+        explicit_target = "auto"
+    elif args.target:
+        explicit_target = normalize_target_name(args.target)
+    elif args.target_pos:
+        explicit_target = normalize_target_name(args.target_pos)
+
+    if explicit_target is None and args.csv is None:
+        if sys.stdin.isatty():
+            current_target = prompt_target_selection()
+        else:
+            current_target = "real"
+    else:
+        current_target = explicit_target or "real"
+
     cfg = load_env_config(repo_root)
     wager_target = _gv(cfg, "FUSION_WAGER_TARGET", _gv(cfg, "WAGER_TARGET", 100.0, float), float)
     loss_cut_pct = _gv(cfg, "FUSION_LOSS_CUT_PCT", 4.0, float)
-    recover_profit_pct = _gv(cfg, "FUSION_RECOVER_PROFIT_PCT", 1.0, float)
     allowed_losses = _gv(cfg, "FUSION_ALLOWED_LOSSES", 600, int)
-    main_mode = _gv(cfg, "FUSION_MAIN_MODE", 1, int)
 
-    csv_path = find_csv_file(repo_root, args.csv)
+    # Resolve target file
+    csv_path, target_badge, target_label = resolve_target_file(repo_root, current_target, args.csv)
 
     # State tracking
     start_balance: float | None = None
@@ -264,6 +408,33 @@ def main():
     sys.stdout.write("\033[2J\033[H\033[?25l")
     sys.stdout.flush()
 
+    def render_waiting_box():
+        W = 70
+        lines: list[str] = []
+        lines.append(header_line(cn(51, f"💎 FUSION BOT v4.2 — {target_badge}", True), W + 2))
+        lines.append(pad_line(f"Source File: {cya_c(str(csv_path.name))}", W))
+        lines.append(pad_line("─" * W, W))
+        lines.append(pad_line("", W))
+        lines.append(pad_line(f"  {yel_c('⏳ Waiting for bets to start stream...')} ", W))
+        if target_label == "REAL":
+            lines.append(pad_line(f"  {_wc('Target :')} External Gambler.Bot (Real Play)", W))
+            lines.append(pad_line(f"  {_gr('Path   :')} {_dim(str(csv_path))}", W))
+            lines.append(pad_line(f"  {_wc('Action :')} Start your bot in Gambler.Bot app", W))
+        else:
+            lines.append(pad_line(f"  {_wc('Target :')} Simulator (bin/fusion_bot.py)", W))
+            lines.append(pad_line(f"  {_gr('Path   :')} {_dim(str(csv_path))}", W))
+            lines.append(pad_line(f"  {_wc('Action :')} Run simulator: {cya_c('py bin/fusion_bot.py')}", W))
+        lines.append(pad_line("", W))
+        lines.append(pad_line("─" * W, W))
+        lines.append(pad_line(f"Hotkeys: {yel_c('[1] Real Bot')}  {yel_c('[2] Simu')}  {yel_c('[3] Auto')}  {neg_c('[Q] Quit')}", W))
+        lines.append(footer_line(W + 2))
+
+        sys.stdout.write("\033[H")
+        for line in lines:
+            sys.stdout.write(f"\r\033[2K{line}\n")
+        sys.stdout.write("\033[J")
+        sys.stdout.flush()
+
     def render_hud(
         round_num: int,
         mode_str: str,
@@ -295,8 +466,9 @@ def main():
         roi_pct = (net_pnl / start_balance * 100.0) if start_balance and start_balance > 0 else 0.0
 
         lines: list[str] = []
-        lines.append(header_line(cn(51, "💎 FUSION BOT v4.1 — Gambler.Bot Live Monitor", True), W + 2))
+        lines.append(header_line(cn(51, f"💎 FUSION BOT v4.2 — {target_badge}", True), W + 2))
         lines.append(col_row(f"Mode: {mode_badge}", f"Round: {_wc(str(round_num))}", 42, W))
+        lines.append(col_row(f"Src : {cya_c(csv_path.name)} ({target_label})", f"Win/Loss: {pos_c(str(win_count))}/{neg_c(str(lose_count))}", 42, W))
         lines.append(pad_line("─" * W, W))
 
         lines.append(col_row(
@@ -354,6 +526,8 @@ def main():
         for m in milestones:
             lines.append(pad_line("  " + m, W))
 
+        lines.append(pad_line("─" * W, W))
+        lines.append(pad_line(f"Hotkeys: {yel_c('[1] Real Bot')}  {yel_c('[2] Simu')}  {yel_c('[3] Auto')}  {neg_c('[Q] Quit')}", W))
         lines.append(footer_line(W + 2))
 
         # ANSI Home Cursor (Zero Flicker, No Repetition)
@@ -365,11 +539,74 @@ def main():
 
     fp = None
     header_map: dict[str, int] = {}
+    last_render_time = 0.0
+
+    def reset_state():
+        nonlocal start_balance, last_processed_round, total_wagered
+        nonlocal win_count, lose_count, max_loss_streak, profit_vault, consecutive_losses
+        nonlocal equity_bins, equity_max_round, equity_history, milestones, fp, header_map
+        if fp:
+            try: fp.close()
+            except Exception: pass
+            fp = None
+        header_map.clear()
+        start_balance = None
+        last_processed_round = 0
+        total_wagered = 0.0
+        win_count = 0
+        lose_count = 0
+        max_loss_streak = 0
+        profit_vault = 0.0
+        consecutive_losses = 0
+        equity_bins = [None] * equity_width
+        equity_max_round = 0
+        equity_history.clear()
+        milestones.clear()
 
     try:
         while not _user_stop:
+            # ── Check Non-Blocking Keyboard Input (Hotkeys: 1, 2, 3, Q) ──
+            if HAS_MSVCRT and msvcrt.kbhit():
+                try:
+                    ch = msvcrt.getch()
+                    ch_str = ch.decode("utf-8", errors="ignore").lower()
+                except Exception:
+                    ch_str = ""
+                if ch_str == "q":
+                    _user_stop = True
+                    break
+                elif ch_str in ("1", "r"):
+                    if current_target != "real":
+                        current_target = "real"
+                        csv_path, target_badge, target_label = resolve_target_file(repo_root, "real", args.csv)
+                        reset_state()
+                        continue
+                elif ch_str in ("2", "s"):
+                    if current_target != "sim":
+                        current_target = "sim"
+                        csv_path, target_badge, target_label = resolve_target_file(repo_root, "sim", args.csv)
+                        reset_state()
+                        continue
+                elif ch_str in ("3", "a"):
+                    if current_target != "auto":
+                        current_target = "auto"
+                        csv_path, target_badge, target_label = resolve_target_file(repo_root, "auto", args.csv)
+                        reset_state()
+                        continue
+
+            # Auto mode re-check latest file periodically
+            if current_target == "auto" and (time.time() - last_render_time > 2.0):
+                new_p, new_badge, new_label = resolve_target_file(repo_root, "auto", args.csv)
+                if new_p != csv_path:
+                    csv_path, target_badge, target_label = new_p, new_badge, new_label
+                    reset_state()
+                    continue
+
             if not csv_path.is_file():
-                time.sleep(0.3)
+                if time.time() - last_render_time > 0.5:
+                    render_waiting_box()
+                    last_render_time = time.time()
+                time.sleep(0.1)
                 continue
 
             try:
@@ -379,22 +616,23 @@ def main():
 
             # File created or reopened
             if fp is None:
-                fp = open(csv_path, "r", encoding="utf-8", errors="replace")
+                try:
+                    fp = open(csv_path, "r", encoding="utf-8", errors="replace")
+                except OSError:
+                    time.sleep(0.1)
+                    continue
 
-            # Check if file was truncated/restarted by Gambler.Bot
+            # Check if file was truncated/restarted by Bot
             if curr_size < fp.tell():
-                fp.close()
-                fp = open(csv_path, "r", encoding="utf-8", errors="replace")
-                header_map.clear()
-                start_balance = None
-                equity_bins = [None] * equity_width
-                equity_history.clear()
-                last_processed_round = 0
-                milestones.clear()
+                reset_state()
                 continue
 
             line = fp.readline()
             if not line:
+                if last_processed_round == 0 and (time.time() - last_render_time > 0.5):
+                    render_waiting_box()
+                    last_render_time = time.time()
+
                 # Flush CRT EOF cache on Windows
                 try:
                     fp.seek(fp.tell())
@@ -502,6 +740,7 @@ def main():
                 round_pnl, net_pnl, balance, streak, vault,
                 chance=chance_val, payout=payout_val, loss_mul=loss_mul_val
             )
+            last_render_time = time.time()
 
     except KeyboardInterrupt:
         pass
@@ -511,7 +750,7 @@ def main():
         if fp:
             try: fp.close()
             except Exception: pass
-        print(cn(51, "  Live Monitor stopped gracefully."))
+        print(cn(51, f"  Live Monitor stopped gracefully. (Target was: {target_label})"))
 
 if __name__ == "__main__":
     main()

@@ -194,48 +194,57 @@ def _cv(cfg: dict[str, str], key: str, default, cast=str):
 # ══════════════════════════════════════════════════════════════════
 # [2] CSV LOGGER (Matches fusion_bot_gamblerbot.py 11 columns)
 # ══════════════════════════════════════════════════════════════════
-def get_csv_path() -> Path:
+def get_csv_paths(custom_path: str | None = None) -> list[Path]:
     repo_root = Path(__file__).resolve().parent.parent
     logs_dir = repo_root / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
-    return logs_dir / "dice_session_latest.csv"
+    if custom_path:
+        return [Path(custom_path)]
+    sim_path = logs_dir / "dice_session_sim.csv"
+    latest_path = logs_dir / "dice_session_latest.csv"
+    return [sim_path, latest_path]
 
-def init_csv(path: Path) -> None:
-    try:
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                "Round", "Mode", "Result", "Roll", "Bet", "RoundPnL",
-                "NetPnL", "Balance", "LossStreak", "ProfitVault",
-                "ConsecutiveLosses", "Chance", "Payout", "LossMul"
-            ])
-    except Exception:
-        pass
+def init_csv(paths: list[Path] | Path) -> None:
+    targets = [paths] if isinstance(paths, Path) else paths
+    for p in targets:
+        try:
+            with open(p, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    "Round", "Mode", "Result", "Roll", "Bet", "RoundPnL",
+                    "NetPnL", "Balance", "LossStreak", "ProfitVault",
+                    "ConsecutiveLosses", "Chance", "Payout", "LossMul"
+                ])
+        except Exception:
+            pass
 
 def log_csv_row(
-    path: Path, rnd: int, mode: str, result: str, roll_val: float,
+    paths: list[Path] | Path, rnd: int, mode: str, result: str, roll_val: float,
     bet_amt: float, round_pnl: float, net_pnl: float, bal: float,
     streak: int, vault: float, con_losses: int,
     chance: float = 0.0, payout: float = 0.0, loss_mul: float = 0.0
 ) -> None:
-    try:
-        with open(path, "a", newline="", encoding="utf-8") as f:
-            csv.writer(f).writerow([
-                rnd, mode, result,
-                f"{roll_val:.2f}",
-                f"{bet_amt:.8f}",
-                f"{round_pnl:.8f}",
-                f"{net_pnl:.8f}",
-                f"{bal:.8f}",
-                streak,
-                f"{vault:.8f}",
-                con_losses,
-                f"{chance:.2f}",
-                f"{payout:.4f}",
-                f"{loss_mul:.4f}",
-            ])
-    except OSError:
-        pass
+    targets = [paths] if isinstance(paths, Path) else paths
+    row = [
+        rnd, mode, result,
+        f"{roll_val:.2f}",
+        f"{bet_amt:.8f}",
+        f"{round_pnl:.8f}",
+        f"{net_pnl:.8f}",
+        f"{bal:.8f}",
+        streak,
+        f"{vault:.8f}",
+        con_losses,
+        f"{chance:.2f}",
+        f"{payout:.4f}",
+        f"{loss_mul:.4f}",
+    ]
+    for p in targets:
+        try:
+            with open(p, "a", newline="", encoding="utf-8") as f:
+                csv.writer(f).writerow(row)
+        except OSError:
+            pass
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -346,6 +355,8 @@ def parse_args(cfg: dict[str, str]):
                    help="Headless mode — emit __RESULT_JSON__ at end")
     p.add_argument("--monitor", action="store_true",
                    help="Launch Live ANSI HUD Monitor (tails Gambler.Bot CSV)")
+    p.add_argument("--csv", type=str, default=None,
+                   help="Custom CSV log path (default: logs/dice_session_sim.csv)")
     p.add_argument("--vault", type=int, default=None,
                    help="Vault mode: 1=Vault (skim profit), 0=Compound (use full balance). Overrides FUSION_ENABLE_VAULT env.")
     return p.parse_args()
@@ -534,8 +545,8 @@ def run_simulation():
     bethigh                 = True  # Stake dice: High=True (Roll Over 100 - chance)
     stop_reason             = "max_rounds"
 
-    csv_path = get_csv_path()
-    init_csv(csv_path)
+    csv_paths = get_csv_paths(args.csv)
+    init_csv(csv_paths)
 
     # ── ROCK SOLID DUAL-LAYER TUI ENGINE ─────────────────────────
     # Keeps HUD at bottom and streams roll lines above without jitter
@@ -890,7 +901,7 @@ def run_simulation():
                 mul_log = manual_loss_mul
 
         log_csv_row(
-            csv_path, rnd, mode, "win" if won else "lose",
+            csv_paths, rnd, mode, "win" if won else "lose",
             roll_val, current_bet, round_pnl, total_pnl, balance,
             loss_streak, profit_vault, consecutive_losses,
             current_roll_chance, payout_log, mul_log
@@ -999,7 +1010,7 @@ def run_simulation():
     print(f"  Win / Loss    : {pos_c(str(win_count))} W  /  {neg_c(str(lose_count))} L  ({win_count / max(1, total_bets) * 100:.2f}%)")
     print(f"  Max Streak    : {neg_c(str(max_loss_streak))} consecutive losses")
     print(f"  Total Wagered : {cya_c(f'{total_wagered:.4f}')} / {wager_target:.2f}")
-    print(f"  Session CSV   : {_gr(str(csv_path))}")
+    print(f"  Session CSV   : {_gr(str(csv_paths[0]))}")
     print(cn(51, "═" * W, True))
 
 

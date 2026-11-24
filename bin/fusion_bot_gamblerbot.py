@@ -94,7 +94,13 @@ def _get_val(cfg, key, default, cast_type=str):
 # ==============================================================================
 # [2] CSV LOGGER
 # ==============================================================================
-CSV_FILE_CANDIDATES = [
+CSV_REAL_CANDIDATES = [
+    os.path.normpath(os.path.join(_base_dir, "..", "logs", "dice_session_real.csv")),
+    os.path.normpath(os.path.join(_base_dir, "..", "simulator", "logs", "dice_session_real.csv")),
+    os.path.normpath(os.path.join(_base_dir, "logs", "dice_session_real.csv")),
+    r"c:\Users\User\simulator\logs\dice_session_real.csv",
+]
+CSV_LATEST_CANDIDATES = [
     os.path.normpath(os.path.join(_base_dir, "..", "logs", "dice_session_latest.csv")),
     os.path.normpath(os.path.join(_base_dir, "..", "simulator", "logs", "dice_session_latest.csv")),
     os.path.normpath(os.path.join(_base_dir, "logs", "dice_session_latest.csv")),
@@ -102,44 +108,63 @@ CSV_FILE_CANDIDATES = [
 ]
 
 _csv_path = None
+_csv_paths = []
 
 def _init_csv():
-    global _csv_path
-    # หา logs dir ที่มีอยู่จริง
-    for p in CSV_FILE_CANDIDATES:
+    global _csv_path, _csv_paths
+    _csv_paths = []
+    
+    # 1. Primary real bot log
+    p_real = None
+    for p in CSV_REAL_CANDIDATES:
         d = os.path.dirname(p)
         if os.path.isdir(d):
-            _csv_path = p
+            p_real = p
             break
-    if _csv_path is None:
-        _csv_path = CSV_FILE_CANDIDATES[-1]
+    if p_real is None:
+        p_real = CSV_REAL_CANDIDATES[-1]
+    _csv_paths.append(p_real)
+    _csv_path = p_real
 
-    try:
-        logs_dir = os.path.dirname(_csv_path)
-        if not os.path.exists(logs_dir):
-            os.makedirs(logs_dir)
+    # 2. Mirror latest log for backward compatibility
+    p_latest = None
+    for p in CSV_LATEST_CANDIDATES:
+        d = os.path.dirname(p)
+        if os.path.isdir(d):
+            p_latest = p
+            break
+    if p_latest is None:
+        p_latest = CSV_LATEST_CANDIDATES[-1]
+    if p_latest not in _csv_paths:
+        _csv_paths.append(p_latest)
+
+    for target in _csv_paths:
         try:
-            with open(_csv_path, "w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow([
-                    "Round", "Mode", "Result", "Roll", "Bet", "RoundPnL",
-                    "NetPnL", "Balance", "LossStreak", "ProfitVault",
-                    "ConsecutiveLosses", "Chance", "Payout", "LossMul"
-                ])
-        except TypeError:
-            with open(_csv_path, "w") as f:
-                writer = csv.writer(f)
-                writer.writerow([
-                    "Round", "Mode", "Result", "Roll", "Bet", "RoundPnL",
-                    "NetPnL", "Balance", "LossStreak", "ProfitVault",
-                    "ConsecutiveLosses", "Chance", "Payout", "LossMul"
-                ])
-    except Exception:
-        pass
+            logs_dir = os.path.dirname(target)
+            if not os.path.exists(logs_dir):
+                os.makedirs(logs_dir)
+            try:
+                with open(target, "w", newline="") as f:
+                    writer = csv.writer(f)
+                    writer.writerow([
+                        "Round", "Mode", "Result", "Roll", "Bet", "RoundPnL",
+                        "NetPnL", "Balance", "LossStreak", "ProfitVault",
+                        "ConsecutiveLosses", "Chance", "Payout", "LossMul"
+                    ])
+            except TypeError:
+                with open(target, "w") as f:
+                    writer = csv.writer(f)
+                    writer.writerow([
+                        "Round", "Mode", "Result", "Roll", "Bet", "RoundPnL",
+                        "NetPnL", "Balance", "LossStreak", "ProfitVault",
+                        "ConsecutiveLosses", "Chance", "Payout", "LossMul"
+                    ])
+        except Exception:
+            pass
 
 
 def _log_csv(*args):
-    if not _csv_path:
+    if not _csv_paths:
         return
     try:
         if len(args) == 9:
@@ -181,12 +206,16 @@ def _log_csv(*args):
             "{0:.4f}".format(float(payout_val)),
             "{0:.4f}".format(float(mul_val)),
         ]
-        try:
-            with open(_csv_path, "a", newline="") as f:
-                csv.writer(f).writerow(row)
-        except TypeError:
-            with open(_csv_path, "a") as f:
-                csv.writer(f).writerow(row)
+        for target in _csv_paths:
+            try:
+                try:
+                    with open(target, "a", newline="") as f:
+                        csv.writer(f).writerow(row)
+                except TypeError:
+                    with open(target, "a") as f:
+                        csv.writer(f).writerow(row)
+            except Exception:
+                pass
     except Exception:
         pass
 
