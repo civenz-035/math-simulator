@@ -525,8 +525,8 @@ def run_status_check(cfg: dict[str, str], args: argparse.Namespace):
     base_url = (args.url or _cv(cfg, "STAKE_BASE_URL", "https://stake.bz", str)).rstrip("/")
 
     cached_cookies = find_cached_cookies()
-    cookie_str = pos_c("Cached cookies found") if cached_cookies else yel_c("No cache (direct/new session)")
-    tls_str = pos_c("curl_cffi (Chrome TLS Impersonation)") if HAS_CURL_CFFI else yel_c("requests (Standard TLS)")
+    cookie_str = pos_c("Cached cookies found") if cached_cookies else yel_c("Direct Session (Zero-Config)")
+    tls_str = pos_c("curl_cffi (Chrome TLS)") if HAS_CURL_CFFI else cya_c("Python stdlib (urllib + CookieJar)")
 
     masked_key = f"{api_key[:8]}...{api_key[-6:]}" if len(api_key) > 16 else (api_key or "NOT SET")
 

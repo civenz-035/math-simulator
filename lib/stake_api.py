@@ -1,26 +1,29 @@
 # -*- coding: utf-8 -*-
 """
 lib/stake_api.py — Standalone Stake GraphQL API Connector
-Architecture: Pure Python Client with Cloudflare TLS & Cookie support
+Architecture: Pure Python stdlib (urllib.request + http.cookiejar)
+Optional accelerator: curl_cffi for Chrome TLS Impersonation
 """
 
 from __future__ import annotations
 
+import http.cookiejar
 import json
 import os
 from pathlib import Path
 import random
 import time
+import urllib.error
 import urllib.parse
+import urllib.request
 from typing import Any, Optional
 
-# Try curl_cffi for Chrome TLS impersonation (bypasses Cloudflare JA3/TLS fingerprint)
+# Optional curl_cffi for Chrome TLS impersonation
 try:
     from curl_cffi import requests as cffi_requests
     HAS_CURL_CFFI = True
 except ImportError:
     HAS_CURL_CFFI = False
-    import requests as std_requests
 
 # GraphQL Queries & Mutations (exact Gambler.Bot / Stake upstream schema)
 LOGIN_QUERY = (
@@ -50,7 +53,7 @@ DICE_MUTATION = (
 
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0"
+    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 
 class StakeAPIError(Exception):
@@ -67,11 +70,10 @@ class StakeBetError(StakeAPIError):
 
 
 def find_cached_cookies() -> dict[str, Any] | None:
-    """Finds Cloudflare cookies from known cache locations."""
+    """Finds Cloudflare cookies from known local cache locations if fresh."""
     candidates = [
         Path.cwd() / ".bypass_cache.json",
         Path(__file__).resolve().parent.parent / ".bypass_cache.json",
-        Path(r"C:\Users\User\Desktop\stakebot\.bypass_cache.json"),
     ]
     for p in candidates:
         if p.is_file():
@@ -100,54 +102,60 @@ class StakeClient:
     ):
         self.api_key = api_key.strip()
         self.base_url = base_url.rstrip("/")
-
-        if HAS_CURL_CFFI:
-            self.session = cffi_requests.Session(impersonate="chrome")
-        else:
-            self.session = std_requests.Session()
-
-        # Load cookies
-        if not cookies:
-            cookies = find_cached_cookies()
-
         self.user_agent = user_agent or DEFAULT_USER_AGENT
-        if isinstance(cookies, dict):
-            if cookies.get("user_agent"):
-                self.user_agent = cookies["user_agent"]
-            host = urllib.parse.urlparse(self.base_url).hostname
+
+        self.cookie_jar = http.cookiejar.CookieJar()
+        self.opener = urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(self.cookie_jar)
+        )
+
+        # Pre-seed cookies if provided explicitly
+        if isinstance(cookies, dict) and "cookies" in cookies:
+            host = urllib.parse.urlparse(self.base_url).hostname or "stake.bz"
             for name, val in (cookies.get("cookies") or {}).items():
-                if host:
-                    self.session.cookies.set(name, str(val), domain=host)
-                else:
-                    self.session.cookies.set(name, str(val))
+                ck = http.cookiejar.Cookie(
+                    version=0, name=name, value=str(val), port=None, port_specified=False,
+                    domain=host, domain_specified=True, domain_initial_dot=False,
+                    path="/", path_specified=True, secure=True, expires=None,
+                    discard=True, comment=None, comment_url=None, rest={}, rfc2109=False,
+                )
+                self.cookie_jar.set_cookie(ck)
 
     def _request_gql(self, query: str, variables: dict | None = None) -> dict[str, Any]:
         url = f"{self.base_url}/_api/graphql"
         headers = {
+            "User-Agent": self.user_agent,
+            "Content-Type": "application/json",
             "x-access-token": self.api_key,
-            "content-type": "application/json",
-            "user-agent": self.user_agent,
-            "origin": self.base_url,
-            "referer": f"{self.base_url}/casino/games/dice",
         }
         body: dict[str, Any] = {"query": query}
         if variables:
             body["variables"] = variables
 
+        data_bytes = json.dumps(body).encode("utf-8")
+        req = urllib.request.Request(url, data=data_bytes, headers=headers)
+
         try:
-            r = self.session.post(url, json=body, headers=headers, timeout=12)
+            with self.opener.open(req, timeout=12) as resp:
+                status_code = resp.status
+                raw_text = resp.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode("utf-8", errors="replace") if e.fp else ""
+            if e.code in (401, 403):
+                raise StakeAuthError(
+                    f"Stake rejection ({e.code}). Please verify your STAKE_API_KEY or connection."
+                ) from e
+            raise StakeAPIError(f"HTTP Error {e.code} from Stake API: {err_body[:200]}") from e
         except Exception as e:
             raise StakeAPIError(f"Network error connecting to {url}: {e}") from e
 
-        if r.status_code in (401, 403) or "<!DOCTYPE html>" in r.text[:200].lower():
-            raise StakeAuthError(
-                f"Cloudflare or Auth rejection ({r.status_code}). Check API Key or update Cloudflare cookies."
-            )
+        if "<!doctype html>" in raw_text[:200].lower():
+            raise StakeAuthError("Cloudflare challenge page received. WAF clearance required.")
 
         try:
-            data = r.json()
+            data = json.loads(raw_text)
         except Exception as e:
-            raise StakeAPIError(f"Invalid JSON response from Stake API: {r.text[:200]}") from e
+            raise StakeAPIError(f"Invalid JSON response from Stake API: {raw_text[:200]}") from e
 
         if "errors" in data and data["errors"]:
             msg = data["errors"][0].get("message", "Unknown GraphQL error")
@@ -172,13 +180,15 @@ class StakeClient:
         """Returns comprehensive account info including all non-zero balances."""
         data = self._request_gql(BALANCE_QUERY)
         user = (data.get("data") or {}).get("user") or {}
-        balances = (user.get("balances") or {}).get("available") or []
+        raw_bals = user.get("balances") or []
         bal_dict: dict[str, float] = {}
-        for b in balances:
-            c = b.get("currency", "").lower()
-            amt = float(b.get("amount", 0.0) or 0.0)
-            if c:
-                bal_dict[c] = amt
+        for item in raw_bals:
+            if isinstance(item, dict):
+                avail = item.get("available") or item
+                c = avail.get("currency", "").lower()
+                amt = float(avail.get("amount", 0.0) or 0.0)
+                if c:
+                    bal_dict[c] = amt
         return {
             "id": user.get("id", ""),
             "name": user.get("name") or "Stake User",
@@ -187,19 +197,10 @@ class StakeClient:
 
     def get_balances(self) -> dict[str, float]:
         """Returns dict of {currency: available_amount}."""
-        data = self._request_gql(BALANCE_QUERY)
-        user = (data.get("data") or {}).get("user") or {}
-        balances = (user.get("balances") or {}).get("available") or []
-        res: dict[str, float] = {}
-        for b in balances:
-            c = b.get("currency", "").lower()
-            amt = float(b.get("amount", 0.0) or 0.0)
-            if c:
-                res[c] = amt
-        return res
+        return self.get_account_info()["balances"]
 
     def get_currency_balance(self, currency: str) -> float:
-        """Returns available balance for specific currency (e.g. 'trx', 'usdt')."""
+        """Returns available balance for specific currency (e.g. 'trx', 'usdt', 'pol')."""
         balances = self.get_balances()
         return balances.get(currency.lower(), 0.0)
 
@@ -217,7 +218,7 @@ class StakeClient:
             amount: Bet amount in crypto
             chance: Win chance in percent (0.01 to 98.0)
             high: True = Roll Over, False = Roll Under
-            currency: Crypto symbol ('trx', 'usdt', 'btc', 'ltc', etc.)
+            currency: Crypto symbol ('trx', 'pol', 'usdt', 'btc', 'ltc', etc.)
             
         Returns:
             dict containing:
@@ -228,9 +229,6 @@ class StakeClient:
                 balance (float): Updated account balance
                 bet_id (str): Stake Bet ID
         """
-        # In Stake Dice:
-        # High=True  -> Roll Over  (Target = 100 - chance, condition = 'above')
-        # High=False -> Roll Under (Target = chance, condition = 'below')
         target = 100.0 - float(chance) if high else float(chance)
         variables = {
             "amount": float(amount),
@@ -251,11 +249,14 @@ class StakeClient:
 
         # Updated balance from user profile in response
         user = dice_roll.get("user") or {}
+        raw_bals = user.get("balances") or []
         new_bal: float = 0.0
-        for b in (user.get("balances") or {}).get("available") or []:
-            if b.get("currency", "").lower() == currency.lower():
-                new_bal = float(b.get("amount", 0.0) or 0.0)
-                break
+        for item in raw_bals:
+            if isinstance(item, dict):
+                avail = item.get("available") or item
+                if avail.get("currency", "").lower() == currency.lower():
+                    new_bal = float(avail.get("amount", 0.0) or 0.0)
+                    break
 
         return {
             "roll_val": roll_val,
