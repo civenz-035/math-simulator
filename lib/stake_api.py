@@ -56,6 +56,24 @@ DEFAULT_USER_AGENT = (
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 
+# Stake Minimum Bet per currency (enforced by Stake Casino Engine)
+STAKE_MIN_BETS: dict[str, float] = {
+    "pol": 0.01,
+    "matic": 0.01,
+    "doge": 0.001,
+    "trx": 0.0001,
+    "usdt": 0.0001,
+    "usdc": 0.0001,
+    "btc": 0.00000001,
+    "eth": 0.0000001,
+    "ltc": 0.00001,
+    "bch": 0.00001,
+    "bnb": 0.0001,
+    "xrp": 0.001,
+    "sol": 0.00001,
+    "eos": 0.001,
+}
+
 class StakeAPIError(Exception):
     """General Stake API error."""
 
@@ -199,6 +217,11 @@ class StakeClient:
         """Returns dict of {currency: available_amount}."""
         return self.get_account_info()["balances"]
 
+    @staticmethod
+    def get_currency_min_bet(currency: str) -> float:
+        """Returns Stake Casino minimum allowed bet for currency."""
+        return STAKE_MIN_BETS.get(currency.lower(), 0.0001)
+
     def get_currency_balance(self, currency: str) -> float:
         """Returns available balance for specific currency (e.g. 'trx', 'usdt', 'pol')."""
         balances = self.get_balances()
@@ -229,9 +252,13 @@ class StakeClient:
                 balance (float): Updated account balance
                 bet_id (str): Stake Bet ID
         """
+        # Auto-clamp to Stake minimum bet per currency to prevent 'Amount too small'
+        min_allowed = self.get_currency_min_bet(currency)
+        actual_amount = max(float(amount), min_allowed)
+
         target = 100.0 - float(chance) if high else float(chance)
         variables = {
-            "amount": float(amount),
+            "amount": actual_amount,
             "target": round(float(target), 4),
             "condition": "above" if high else "below",
             "currency": str(currency).lower(),
@@ -244,7 +271,7 @@ class StakeClient:
 
         roll_val = float(state.get("result", 0.0) or 0.0)
         payout_amt = float(dice_roll.get("payout", 0.0) or 0.0)
-        pnl = payout_amt - float(amount)
+        pnl = payout_amt - actual_amount
         won = pnl > 0.0
 
         # Updated balance from user profile in response

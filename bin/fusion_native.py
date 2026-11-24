@@ -509,19 +509,22 @@ def run_status_check(cfg: dict[str, str], args: argparse.Namespace):
     stop_p = _cv(cfg, "FUSION_STOP_PROFIT", 1.0, float)
     stop_l = _cv(cfg, "FUSION_STOP_LOSS", 0.0, float)
 
+    target_currency = (args.currency or _cv(cfg, "STAKE_CURRENCY", "trx", str)).lower()
+    stake_min = StakeClient.get_currency_min_bet(target_currency)
+    effective_min_bet = max(min_bet_val, stake_min)
+
     print(f"  {_wc('📁 Configuration (SSOT)')}")
     print(f"  ├─ Config File      : {_wc(str(cfg_file))}")
     print(f"  ├─ Strategy Mode    : {yel_c(f'[{main_mode}] {strat_name}')}")
     print(f"  ├─ Vault Mode       : {_wc(vault_mode)}")
     print(f"  ├─ Chance Setup     : {_wc(chance_str)}")
-    print(f"  ├─ Base Bet Mode    : {_wc(base_mode)}  │  Min Bet: {_wc(f'{min_bet_val:.8f}')}")
+    print(f"  ├─ Base Bet Mode    : {_wc(base_mode)}  │  Min Bet: {_wc(f'{effective_min_bet:.8f}')} ({target_currency.upper()} Stake Min)")
     print(f"  ├─ Loss Multiplier  : {_wc(mul_mode)}")
     print(f"  └─ Safety Caps      : Take Profit: {pos_c(f'+{stop_p*100:.1f}%') if stop_p > 0 else 'Disabled'} │ Stop Loss: {neg_c(f'-{stop_l*100:.1f}%') if stop_l > 0 else 'Disabled'}")
     print()
 
     # 2. API Connection & Credentials
     api_key = args.api_key or os.environ.get("STAKE_API_KEY") or _cv(cfg, "STAKE_API_KEY", "")
-    target_currency = (args.currency or _cv(cfg, "STAKE_CURRENCY", "trx", str)).lower()
     base_url = (args.url or _cv(cfg, "STAKE_BASE_URL", "https://stake.bz", str)).rstrip("/")
 
     cached_cookies = find_cached_cookies()
@@ -580,7 +583,7 @@ def run_status_check(cfg: dict[str, str], args: argparse.Namespace):
     est_chance = (c_min + c_max) / 2.0 if auto_chance else c_fix
     est_n = solve_dynamic_allowed_losses(est_chance, risk_alpha)
     est_mul, _ = get_payout_and_multiplier(est_chance, bonus_pct, main_mode == 2, he)
-    est_base, est_div = solve_base_bet_with_mul(ref_bal, est_mul, est_n, min_bet_val)
+    est_base, est_div = solve_base_bet_with_mul(ref_bal, est_mul, est_n, effective_min_bet)
 
     print(f"  {_wc('🧮 Math Pre-Flight Check')}")
     print(f"  ├─ Bankroll Base    : {_wc(f'{ref_bal:.8f}')} {target_currency.upper()} ({'LIVE API' if connected and live_bal > 0 else 'SIMULATED MOCK'})")
@@ -589,7 +592,7 @@ def run_status_check(cfg: dict[str, str], args: argparse.Namespace):
     print(f"  ├─ Initial Base Bet : {pos_c(f'{est_base:.8f}')} {target_currency.upper()} (Divisor: {est_div:.2f})")
     
     # Verdict
-    if connected and live_bal >= min_bet_val * 10:
+    if connected and live_bal >= effective_min_bet * 10:
         verdict = f"{pos_c('🟢 READY FOR LIVE PLAY')} — Everything verified, balance sufficient."
     elif connected and live_bal > 0:
         verdict = f"{yel_c('🟡 LOW BALANCE')} — Balance is low ({live_bal:.8f} {target_currency.upper()}). Consider depositing or testing with --mock."
@@ -685,7 +688,9 @@ def run_simulation():
     risk_alpha            = cv("FUSION_RISK_ALPHA", cv("RISK_ALPHA", 0.001, float), float)
     manual_allowed_losses = cv("FUSION_ALLOWED_LOSSES",     14,    int)
     allowed_losses        = manual_allowed_losses
-    min_bet               = cv("FUSION_MIN_BET",            0.00000001, float)
+    min_bet               = cv("FUSION_MIN_BET",            0.0001, float)
+    if is_live:
+        min_bet = max(min_bet, StakeClient.get_currency_min_bet(currency))
     # Vault vs Compound mode
     _vault_env = cv("FUSION_ENABLE_VAULT", 1, int) != 0
     enable_vault = _vault_env if args.vault is None else (args.vault != 0)
