@@ -76,13 +76,18 @@ else
 	_alias_sh="${BASH_SOURCE[0]:-$0}"
 fi
 _alias_sh_dir="$(cd -- "$(dirname -- "${_alias_sh}")" && pwd)"
-sim="${sim:-$(cd -- "$_alias_sh_dir/.." && pwd)}"
+sim="${"sim:-$(cd -- "$_alias_sh_dir/.." &&" pwd)}"
 dmenu(){ "$_alias_sh_dir/../bin/menu.sh" "$@"; }
 alias dmn='dmenu' 
 
 gameble(){
-	local py_cmd="python"
-	#command -v python >/dev/null 2>&1 || py_cmd="py"
+	
+	if command -v python >/dev/null 2>&1; then
+		local py_cmd="python"
+	elif command -v python3 >/dev/null 2>&1; then
+		local py_cmd="python3"
+	fi	
+
 
 	case "$1" in
 		-chk|--check|status|--status)
