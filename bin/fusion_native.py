@@ -814,7 +814,10 @@ def run_simulation():
         if cp > 0:
             if enable_vault:
                 profit_vault += cp
-                buffer_scroll(f"  {pos_c('✅ Cycle Complete!')} Profit: {pos_c(f'{cp:.8f}')} │ 💎 Vault: {pos_c(f'{profit_vault:.8f}')}")
+                _real_info = ""
+                if is_live:
+                    _real_info = f" │ {_gr(f'Real Bal: {balance + profit_vault + cp:.8f}')}"
+                buffer_scroll(f"  {pos_c('✅ Cycle Complete!')} Profit: {pos_c(f'{cp:.8f}')} │ 💎 Vault: {pos_c(f'{profit_vault:.8f}')}{_real_info}")
                 balance = original_cycle_balance
                 working_balance = balance
                 cycle_start_balance = original_cycle_balance
@@ -956,6 +959,19 @@ def run_simulation():
                 # Some API responses omit the balance; fall back to local accounting
                 # instead of falsely reporting a bust.
                 api_balance = (balance + profit_vault if enable_vault else balance) + round_pnl
+            if enable_vault:
+                # Vault = locked profit safe (one-way). External balance changes
+                # (deposit / tip / rain / another script on the same account) are
+                # capital, not profit: re-base the skim reference so they can
+                # never be skimmed into the vault.
+                expected_real = balance + profit_vault + round_pnl
+                drift = api_balance - expected_real
+                if abs(drift) > 1e-9:
+                    original_cycle_balance += drift
+                    buffer_scroll(
+                        f"  {yel_c('⚠️  External balance change')} {drift:+.8f}"
+                        f" {yel_c('→ capital (ref now')} {yel_c(f'{original_cycle_balance:.8f}')})"
+                    )
             # Vault mode is virtual: the live API balance still contains profit
             # already skimmed into the vault. Strategy, P/L and the HUD must use
             # the working balance (API balance minus vault), not the raw API value.
