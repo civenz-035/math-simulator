@@ -82,16 +82,13 @@ alias dmn='dmenu'
 
 gameble(){
 	
-	if command -v python >/dev/null 2>&1 ;then
+	local py_cmd
 
-        local py_cmd="python"
-
-    elif command -v python3 >/dev/null 2>&1 ;then
-
-
-         local py_cmd="python3"
-
-    fi
+	if command -v python >/dev/null 2>&1; then
+		py_cmd="python"
+	elif command -v python3 >/dev/null 2>&1 ;then
+		py_cmd="python3"
+	fi
 
 
 	case "$1" in
