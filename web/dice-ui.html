@@ -2,7 +2,16 @@
 <html lang="th">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#0a0d14" />
+<meta name="description" content="Dice Lab — Monte-Carlo dice simulator, survivor solver และ Fusion Bot บนเครือข่าย Tailscale" />
+<link rel="manifest" href="/manifest.json" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Dice Lab" />
 <title>🎲 Dice Lab — ห้องทดลองความน่าจะเป็น</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -173,6 +182,56 @@ table.rt td{text-align:right;padding:3px 6px;border-top:1px solid rgba(99,120,20
 .presetcard small{font-size:.68rem;color:var(--muted);line-height:1.5}
 .presetcard .ptag{font-family:var(--mono);font-size:.6rem;color:var(--muted);letter-spacing:.6px}
 @media(max-width:900px){.presetbar{grid-template-columns:1fr}}
+
+/* ══ v2: PWA / config switch / fusion / live charts ══ */
+.configbar{grid-column:1/-1;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:6px;margin-bottom:2px}
+.cfgbtn{border:1.5px solid transparent;background:transparent;color:var(--muted);border-radius:9px;
+  padding:8px 14px;font-size:.78rem;font-weight:800;cursor:pointer;transition:.2s;font-family:var(--mono)}
+.cfgbtn:hover{color:var(--text);background:rgba(107,140,255,.08)}
+.cfgbtn.active{color:var(--accent);background:rgba(107,140,255,.14);border-color:rgba(107,140,255,.35)}
+.cfgnote{font-size:.68rem;color:var(--muted);font-family:var(--mono);margin-left:auto;padding-right:8px}
+#setupFusion{display:none;grid-column:1/-1;min-height:0}
+#panel-setup.fusion{grid-template-rows:auto 1fr}
+#panel-setup.fusion #presetBar,#panel-setup.fusion #setupModes,
+#panel-setup.fusion #setupMid,#panel-setup.fusion #setupAdv{display:none !important}
+#panel-setup.fusion #setupFusion{display:block}
+.fusiongrid{display:grid;grid-template-columns:repeat(3,1fr);gap:0 14px}
+.fusiongrid .f label{font-size:.58rem;letter-spacing:.2px;text-transform:none}
+.fusionsearch{margin-bottom:10px}
+.kpis{grid-template-columns:repeat(auto-fit,minmax(112px,1fr))}
+.runbar{position:relative;margin-top:2px}
+.progress{display:none;height:8px;border-radius:99px;background:#202940;overflow:hidden;margin-top:9px}
+.progress.on{display:block}
+.progress i{display:block;height:100%;width:0;border-radius:99px;
+  background:linear-gradient(90deg,var(--accent),var(--green));transition:width .25s ease}
+.progtext{font-family:var(--mono);font-size:.68rem;color:var(--muted);margin-top:5px;min-height:14px}
+.chartbody{display:grid;grid-template-columns:minmax(0,1fr) 126px;gap:10px;flex:1;min-height:0}
+.chartbody #equity{width:100%;height:100%;min-height:0}
+.wlbox{border-left:1px solid var(--border);padding-left:10px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:6px;min-width:0}
+#wlDonut{width:108px;height:108px;flex-shrink:0}
+.wlleg{font-size:.66rem;font-family:var(--mono);text-align:center;line-height:1.55;color:var(--muted)}
+.wlleg b{color:var(--text)}
+@media(max-width:1100px){.chartbody{grid-template-columns:minmax(0,1fr) 108px}}
+@media(max-width:900px){
+  .chartbody{grid-template-columns:1fr}
+  .kpis{grid-template-columns:repeat(2,1fr)}
+  .wlbox{flex-direction:row;border-left:none;border-top:1px solid var(--border);padding:8px 0 0;gap:12px}
+  #wlDonut{width:74px;height:74px}
+  .fusiongrid{grid-template-columns:1fr}
+  .cfgnote{width:100%;margin-left:0;order:3}
+  .runbar{position:sticky;bottom:calc(8px + env(safe-area-inset-bottom));z-index:8;
+    background:linear-gradient(180deg,rgba(10,13,20,0),rgba(10,13,20,.94) 34%);padding-top:10px}
+  #btnRun{box-shadow:0 10px 30px rgba(5,150,105,.35)}
+}
+@media (pointer:coarse){
+  .btn,.tab,.cfgbtn{min-height:44px}
+  .f input,.f select{font-size:16px;padding:10px}
+  .slide input[type=range]{height:6px}
+}
+.app{padding-left:max(16px,env(safe-area-inset-left));padding-right:max(16px,env(safe-area-inset-right))}
+#toast{bottom:calc(24px + env(safe-area-inset-bottom))}
 </style>
 </head>
 <body>
@@ -182,6 +241,7 @@ table.rt td{text-align:right;padding:3px 6px;border-top:1px solid rgba(99,120,20
     <div class="htitle"><h1>Dice <span>Lab</span></h1><p>ห้องทดลองความน่าจะเป็น · Monte-Carlo</p></div>
     <div class="hspace"></div>
     <div class="srv"><span class="dot" id="dot"></span><span id="srvTxt">connecting…</span></div>
+    <button class="btn" id="btnInstall" style="display:none">📲 ติดตั้งแอป</button>
     <button class="btn" id="btnReload">↺ โหลดใหม่</button>
     <button class="btn primary" id="btnSave">💾 บันทึก config</button>
   </header>
@@ -196,6 +256,11 @@ table.rt td{text-align:right;padding:3px 6px;border-top:1px solid rgba(99,120,20
   <main>
     <!-- ═══ TAB 1: SETUP ═══ -->
     <section class="panel active" id="panel-setup">
+      <div class="configbar" id="configBar">
+        <button class="cfgbtn active" data-cfg="dice">🎲 dice.env</button>
+        <button class="cfgbtn" data-cfg="fusion">💎 fusion.env</button>
+        <span class="cfgnote" id="cfgNote">SSOT ของ roll.py · web lab · presets</span>
+      </div>
       <div class="presetbar" id="presetBar"></div>
       <div class="col" id="setupModes">
         <h3>🎯 โหมดจำลอง</h3>
@@ -223,18 +288,31 @@ table.rt td{text-align:right;padding:3px 6px;border-top:1px solid rgba(99,120,20
         <div class="hint">ค่า <b>0 = ปิด</b> ทุก trigger ถ้าไม่เข้าใจให้คง 0 ไว้ ระบบจะใช้พฤติกรรมพื้นฐาน (ทบเมื่อแพ้ · รีเซ็ตเมื่อชนะ)</div>
         <div id="fAdv"></div>
       </div>
+      <div class="col" id="setupFusion">
+        <h3>💎 fusion.env — Fusion Bot</h3>
+        <div class="hint">
+          ไฟล์นี้ใช้ร่วมกับ <b>fusion_bot.py</b> และ engine live ภายนอก ·
+          ค่าที่เป็น <b>0 = ปิด / 1 = เปิด</b> ·
+          <b>API key ถูกซ่อนและห้ามแก้จากเบราว์เซอร์</b> เพื่อความปลอดภัย
+        </div>
+        <div class="f fusionsearch"><label>ค้นหา key</label>
+          <input type="text" id="fusionSearch" placeholder="เช่น WAGER, CHANCE, STOP, VAULT" autocomplete="off">
+        </div>
+        <div id="fFusion"><div class="empty">กำลังโหลด fusion.env…</div></div>
+      </div>
     </section>
 
     <!-- ═══ TAB 2: LAB ═══ -->
     <section class="panel" id="panel-lab">
       <div class="col" id="labCtl">
         <h3>▶ ควบคุมการรัน</h3>
-        <div class="f"><label>โหมด</label><select id="labMode">
-          <option value="1">1 — Escalation (ทบเมื่อแพ้)</option>
-          <option value="2">2 — High-Frequency (เบทคงที่ 98%)</option>
-          <option value="3">3 — Dual-Strategy (สลับอัตโนมัติ)</option>
-          <option value="4">4 — Configurable</option>
-          <option value="5">5 — Survivor</option>
+        <div class="f"><label>เอนจินจำลอง</label><select id="labEngine">
+          <option value="roll">🎲 Dice Roll — Mode 1–5</option>
+          <option value="fusion">💎 Fusion Bot — Mode 1–2</option>
+        </select></div>
+        <div class="f fusion-only" style="display:none"><label>โหมด Fusion</label><select id="labFusionMode">
+          <option value="1">1 — Wager Focus + Recovery</option>
+          <option value="2">2 — Profit Focus</option>
         </select></div>
         <div class="f"><label>จำนวนรอบ (rounds)</label>
           <div class="slide"><input type="range" id="labRoundsR" min="10" max="50000" step="10" value="1000">
@@ -243,27 +321,48 @@ table.rt td{text-align:right;padding:3px 6px;border-top:1px solid rgba(99,120,20
           <div class="f"><label>ทุนตั้งต้น (ว่าง=ตาม config)</label><input type="number" id="labBalance" placeholder="config" step="any"></div>
           <div class="f"><label>Seed (ว่าง=สุ่ม)</label><input type="number" id="labSeed" placeholder="สุ่ม"></div>
         </div>
-        <div class="frow">
-          <div class="f"><label>Base bet (ว่าง=ตาม config)</label><input type="number" id="labBaseBet" placeholder="config" step="any"></div>
-          <div class="f"><label>Win chance % (ว่าง=ตาม config)</label><input type="number" id="labChance" placeholder="config" step="any"></div>
-        </div>
-        <div class="frow">
-          <div class="f"><label>ฝั่งแทง</label><select id="labStrategy"><option value="">ตาม config</option><option value="high">high</option><option value="low">low</option></select></div>
-          <div class="f"><label>หยุดเมื่อแพ้ติด (ว่าง=ตาม config)</label><input type="number" id="labMaxLoss" placeholder="config" min="0"></div>
-        </div>
-        <details class="adv"><summary>▼ ตัวเลือกเพิ่มเติม <span>▾</span></summary><div class="advbody">
+        <div id="rollFields">
+          <div class="f"><label>โหมด Roll</label><select id="labMode">
+            <option value="1">1 — Escalation (ทบเมื่อแพ้)</option>
+            <option value="2">2 — High-Frequency (เบทคงที่ 98%)</option>
+            <option value="3">3 — Dual-Strategy (สลับอัตโนมัติ)</option>
+            <option value="4">4 — Configurable</option>
+            <option value="5">5 — Survivor</option>
+          </select></div>
           <div class="frow">
-            <div class="f"><label>เป้ากำไร (stop-win)</label><input type="number" id="labStopWin" placeholder="ไม่หยุด" step="any"></div>
-            <div class="f"><label>เป้า wagered (โหมด 2/3)</label><input type="number" id="labStopWagered" placeholder="config" step="any"></div>
+            <div class="f"><label>Base bet (ว่าง=ตาม config)</label><input type="number" id="labBaseBet" placeholder="config" step="any"></div>
+            <div class="f"><label>Win chance % (ว่าง=ตาม config)</label><input type="number" id="labChance" placeholder="config" step="any"></div>
           </div>
           <div class="frow">
-            <div class="f"><label>หยุดเมื่อชนะครบ N ครั้ง</label><input type="number" id="labOnWin" placeholder="0=ไม่จำกัด" min="0"></div>
-            <div class="f"><label>Wager win chance %</label><input type="number" id="labWagerChance" placeholder="config" step="any"></div>
+            <div class="f"><label>ฝั่งแทง</label><select id="labStrategy"><option value="">ตาม config</option><option value="high">high</option><option value="low">low</option></select></div>
+            <div class="f"><label>หยุดเมื่อแพ้ติด (ว่าง=ตาม config)</label><input type="number" id="labMaxLoss" placeholder="config" min="0"></div>
           </div>
-          <div class="tgl"><span>🎯 ติดตาม Rare (990×–9900×)</span><input type="checkbox" id="labRare"></div>
-          <div class="tgl"><span>💾 ใช้ค่าจากแท็บตั้งค่า</span><input type="checkbox" id="labUseCfg" checked></div>
-        </div></details>
-        <button class="btn run" id="btnRun" style="width:100%">▶ รันจำลอง</button>
+          <details class="adv"><summary>▼ ตัวเลือกเพิ่มเติม <span>▾</span></summary><div class="advbody">
+            <div class="frow">
+              <div class="f"><label>เป้ากำไร (stop-win)</label><input type="number" id="labStopWin" placeholder="ไม่หยุด" step="any"></div>
+              <div class="f"><label>เป้า wagered (โหมด 2/3)</label><input type="number" id="labStopWagered" placeholder="config" step="any"></div>
+            </div>
+            <div class="frow">
+              <div class="f"><label>หยุดเมื่อชนะครบ N ครั้ง</label><input type="number" id="labOnWin" placeholder="0=ไม่จำกัด" min="0"></div>
+              <div class="f"><label>Wager win chance %</label><input type="number" id="labWagerChance" placeholder="config" step="any"></div>
+            </div>
+            <div class="tgl"><span>🎯 ติดตาม Rare (990×–9900×)</span><input type="checkbox" id="labRare"></div>
+          </div></details>
+        </div>
+        <div class="fusion-only" style="display:none">
+          <div class="f"><label>Vault mode</label><select id="labVault">
+            <option value="">ตาม fusion.env</option>
+            <option value="0">0 — Compound (ใช้ทุนเต็ม)</option>
+            <option value="1">1 — Vault (แยกกำไร)</option>
+          </select></div>
+          <div class="hint">Fusion ใช้ค่ากลยุทธ์จาก <b>fusion.env</b> — ปรับได้ที่แท็บ 🎛️ ตั้งค่า → fusion.env</div>
+        </div>
+        <div class="tgl"><span>💾 <span id="labUseCfgLabel">ใช้ค่าจากแท็บตั้งค่า</span></span><input type="checkbox" id="labUseCfg" checked></div>
+        <div class="runbar">
+          <button class="btn run" id="btnRun" style="width:100%">▶ รันจำลอง</button>
+          <div class="progress" id="runProgress"><i id="runProgressBar"></i></div>
+          <div class="progtext" id="runProgressTxt"></div>
+        </div>
         <div style="display:flex;gap:8px;margin-top:8px">
           <button class="btn" id="btnSeed" style="flex:1" title="สุ่ม seed ใหม่">🎲 seed</button>
           <button class="btn" id="btnCsv" style="flex:1">📥 CSV</button>
@@ -278,15 +377,28 @@ table.rt td{text-align:right;padding:3px 6px;border-top:1px solid rgba(99,120,20
           <div class="kpi"><div class="l">แพ้ติดสูงสุด</div><div class="v orange" id="kStreak">—</div></div>
           <div class="kpi"><div class="l">รอบที่รัน</div><div class="v" id="kRounds">—</div></div>
           <div class="kpi"><div class="l">Wagered</div><div class="v yellow" id="kWager">—</div></div>
+          <div class="kpi"><div class="l">Max Drawdown</div><div class="v red" id="kDd">—</div></div>
         </div>
         <div class="chartwrap">
           <div class="charthead">
             <b style="font-size:.8rem">📈 เส้นทุน (equity curve)</b>
-            <select id="chartSel"><option value="balance">Balance</option><option value="netPnl">Net PnL สะสม</option><option value="bet">ขนาดเบทต่อรอบ</option></select>
+            <select id="chartSel">
+              <option value="account">Equity รวม vault</option>
+              <option value="balance">Balance (working)</option>
+              <option value="netPnl">Net PnL สะสม</option>
+              <option value="drawdown">Drawdown %</option>
+              <option value="bet">ขนาดเบทต่อรอบ</option>
+            </select>
             <span class="stopbadge" id="stopBadge" style="display:none"></span>
             <span style="flex:1"></span><span style="font-size:.7rem;color:var(--muted);font-family:var(--mono)" id="chartInfo"></span>
           </div>
-          <canvas id="equity"></canvas>
+          <div class="chartbody">
+            <canvas id="equity"></canvas>
+            <div class="wlbox">
+              <canvas id="wlDonut" width="108" height="108"></canvas>
+              <div class="wlleg" id="wlLegend">ยังไม่มีผล</div>
+            </div>
+          </div>
         </div>
         <div class="labbottom">
           <div class="minicol"><h4>🧾 รอบล่าสุด (<span id="recentN">0</span>)</h4><div id="recentTbl"><div class="empty">กด “▶ รันจำลอง” เพื่อเริ่มการทดลอง</div></div></div>
@@ -403,6 +515,26 @@ const MODES = {
  5:['🛡️ Survivor','คำนวณเบทจากสูตร closed-form ให้รอด N ไม้แดงติดพอดี แล้ววัดผลจริง'],
 };
 let CFG = {};
+let configFile = 'dice';
+let fusionCfg = {};
+let installPrompt = null;
+const FUSION_BOOL = new Set([
+  'AUTO_CAL_BASE_BET', 'AUTO_CAL_LOSS_MUL', 'AUTO_CAL_ALLOWED_LOSS',
+  'FUSION_ENABLE_VAULT', 'FUSION_ENABLE_WAGER_TARGET', 'FUSION_AUTO_CHANCE',
+  'FUSION_RANDOM_ON_WIN', 'FUSION_RANDOM_ON_LOSE',
+]);
+const FUSION_GROUPS = [
+  ['🏦 ทุน & Global', k => ['START_BALANCE', 'HE'].includes(k) || k.startsWith('GLOBAL_')],
+  ['🎯 กลยุทธ์หลัก', k => ['FUSION_MAIN_MODE', 'FUSION_ENABLE_VAULT'].includes(k)],
+  ['🧮 Auto / Manual', k => k.startsWith('AUTO_CAL_') || k.startsWith('FUSION_MANUAL_') ||
+    ['FUSION_RISK_ALPHA', 'FUSION_ALLOWED_LOSSES', 'FUSION_MIN_BET'].includes(k)],
+  ['🎲 Wager / Recovery', k => k.startsWith('FUSION_WAGER_') || k.startsWith('FUSION_LOSS_CUT_') ||
+    k.startsWith('FUSION_RECOVER_')],
+  ['🎯 Chance', k => k.startsWith('FUSION_CHANCE_') || k.startsWith('FUSION_RANDOM_') ||
+    ['FUSION_AUTO_CHANCE', 'FUSION_RISK_BONUS_PCT'].includes(k)],
+  ['🛑 Stop rules', k => k.startsWith('FUSION_STOP_')],
+  ['🌐 Stake', k => k.startsWith('STAKE_')],
+];
 /* ══ build fields ══ */
 function fieldHTML(key, label, kind) {
   if (kind === 'bool') return `<div class="tgl"><span>${label}<br><small style="font-family:var(--mono);color:var(--muted)">${key}</small></span><input type="checkbox" id="${key}"></div>`;
@@ -430,6 +562,70 @@ function bindSliders(root) {
     num.addEventListener('input', () => { if (+num.value >= +r.min && +num.value <= +r.max) { r.value = num.value; paint(); } });
     paint();
   });
+}
+/* ══ fusion.env — dynamic form (secret keys never leave the server) ══ */
+function fusionFieldHTML(key, value) {
+  const id = 'fx_' + key;
+  const raw = String(value ?? '');
+  let control;
+  if (FUSION_BOOL.has(key)) {
+    control = `<select id="${id}" data-fkey="${key}"><option value="1">1 — เปิด</option><option value="0">0 — ปิด</option></select>`;
+  } else if (key === 'FUSION_MAIN_MODE') {
+    control = `<select id="${id}" data-fkey="${key}"><option value="1">1 — Wager + Recovery</option><option value="2">2 — Profit Focus</option></select>`;
+  } else if (key === 'STAKE_CURRENCY' || key === 'STAKE_BASE_URL' || !/^-?\d+(\.\d+)?$/.test(raw.trim())) {
+    control = `<input type="text" id="${id}" data-fkey="${key}" autocomplete="off">`;
+  } else {
+    control = `<input type="number" step="any" id="${id}" data-fkey="${key}">`;
+  }
+  return `<div class="f" data-fk="${key}"><label>${key}</label>${control}</div>`;
+}
+function renderFusionForm(data) {
+  fusionCfg = { ...data };
+  const box = $('fFusion');
+  const keys = Object.keys(data).sort();
+  if (!keys.length) {
+    box.innerHTML = '<div class="empty">ไม่พบ key ที่แก้ไขได้ใน fusion.env</div>';
+    return;
+  }
+  let html = '';
+  const used = new Set();
+  FUSION_GROUPS.forEach(([title, test]) => {
+    const ks = keys.filter(k => !used.has(k) && test(k));
+    if (!ks.length) return;
+    ks.forEach(k => used.add(k));
+    html += `<div class="seclabel">${title}</div><div class="fusiongrid">${ks.map(k => fusionFieldHTML(k, data[k])).join('')}</div>`;
+  });
+  const rest = keys.filter(k => !used.has(k));
+  if (rest.length) {
+    html += `<div class="seclabel">⚙️ อื่นๆ</div><div class="fusiongrid">${rest.map(k => fusionFieldHTML(k, data[k])).join('')}</div>`;
+  }
+  box.innerHTML = html;
+  box.querySelectorAll('[data-fkey]').forEach(el => {
+    el.value = String(data[el.dataset.fkey] ?? '');
+  });
+  filterFusion($('fusionSearch').value.trim().toLowerCase());
+}
+function filterFusion(q) {
+  const box = $('fFusion');
+  if (!box) return;
+  box.querySelectorAll('.fusiongrid').forEach(grid => {
+    let any = false;
+    grid.querySelectorAll('.f').forEach(f => {
+      const show = !q || f.dataset.fk.toLowerCase().includes(q);
+      f.style.display = show ? '' : 'none';
+      if (show) any = true;
+    });
+    grid.style.display = any ? '' : 'none';
+    const label = grid.previousElementSibling;
+    if (label && label.classList.contains('seclabel')) label.style.display = any ? '' : 'none';
+  });
+}
+function collectFusion() {
+  const out = { ...fusionCfg };
+  document.querySelectorAll('#fFusion [data-fkey]').forEach(el => {
+    out[el.dataset.fkey] = el.value.trim();
+  });
+  return out;
 }
 /* ══ tabs ══ */
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
@@ -465,7 +661,9 @@ async function ping() {
 async function updateStatus() {
   const ok = await ping();
   $('dot').classList.toggle('on', ok);
-  $('srvTxt').textContent = ok ? 'Online ✓' : 'Offline — รัน dice-server.py';
+  $('srvTxt').textContent = ok
+    ? 'Online ✓'
+    : (navigator.onLine ? 'Offline — รัน dice-server.py' : 'Offline — ใช้แคช');
 }
 /* ══ 3-พระโซน presets — ดึงจาก server (/presets → bin/presets.py ไฟล์เดียว) ══ */
 async function renderPresets() {
@@ -482,6 +680,7 @@ async function renderPresets() {
       <small>${p.blurb}</small>
       <span class="ptag">${Object.entries(p.keys).slice(0, 3).map(([k, v]) => `${k}=${v}`).join(' · ')} …</span>
     </div>`).join('');
+  bar.style.display = configFile === 'fusion' ? 'none' : '';
   bar.querySelectorAll('.presetcard').forEach(c => c.addEventListener('click', () => applyPreset(c.dataset.tag)));
 }
 async function applyPreset(tag) {
@@ -492,10 +691,10 @@ async function applyPreset(tag) {
     const p = list[tag];
     if (!p) throw new Error('ไม่พบ preset');
     // บันทึกแค่ KEYS ของพรีเซตลง dice.env ตัวจริง — key อื่นที่พี่ปรับไว้ไม่โดนเปลี่ยน
-    const res = await fetch('/set', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p.keys) });
+    const res = await fetch('/set?file=dice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p.keys) });
     const j = await res.json();
     if (!j.ok) throw new Error(j.error || 'save failed');
-    await loadConfig(true);
+    if (configFile === 'dice') await loadConfig(true);
     toast(`✅ ใช้ preset แล้ว: ${p.name} → สลับไปแท็บ 🧪 แล้วกด "▶ รันจำลอง"`);
   } catch (e) { toast('❌ ' + e.message, 'err'); }
 }
@@ -526,72 +725,188 @@ function applyCFG(d) {
   });
   syncModeUI();
 }
+function setConfigFile(file, silent = false) {
+  configFile = file === 'fusion' ? 'fusion' : 'dice';
+  const fusion = configFile === 'fusion';
+  document.querySelectorAll('.cfgbtn').forEach(b => b.classList.toggle('active', b.dataset.cfg === configFile));
+  $('panel-setup').classList.toggle('fusion', fusion);
+  $('presetBar').style.display = fusion ? 'none' : ($('presetBar').children.length ? '' : 'none');
+  $('cfgNote').textContent = fusion
+    ? 'SSOT ของ fusion_bot.py · live engine ภายนอก'
+    : 'SSOT ของ roll.py · web lab · presets';
+  $('btnSave').textContent = fusion ? '💾 บันทึก fusion.env' : '💾 บันทึก dice.env';
+  return loadConfig(silent);
+}
 async function loadConfig(silent = false) {
+  const file = configFile;
   try {
-    const r = await fetch('/get');
-    if (!r.ok) throw 0;
-    applyCFG(await r.json());
-    if (!silent) toast('✓ โหลด config แล้ว');
-  } catch { if (!silent) toast('⚠ เซิร์ฟเวอร์ออฟไลน์', 'info'); }
+    const r = await fetch('/get?file=' + file);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    if (file !== configFile) return;  // user switched tabs while loading
+    if (file === 'fusion') {
+      renderFusionForm(d);
+      if (!silent) toast('✓ โหลด fusion.env แล้ว');
+    } else {
+      applyCFG(d);
+      if (!silent) toast('✓ โหลด dice.env แล้ว');
+    }
+  } catch (e) { if (!silent) toast('⚠ โหลด config ไม่ได้: ' + e.message, 'info'); }
 }
 async function saveConfig() {
-  const data = collectCFG();
+  const file = configFile;
   try {
-    const r = await fetch('/set', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    const data = file === 'fusion' ? collectFusion() : collectCFG();
+    const r = await fetch('/set?file=' + file, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+    });
     const j = await r.json();
-    if (j.ok) { CFG = data; toast('✅ บันทึก dice.env แล้ว'); }
-    else toast('❌ ' + (j.error || 'save failed'), 'err');
+    if (!j.ok) throw new Error(j.error || 'save failed');
+    if (file === 'fusion') fusionCfg = { ...fusionCfg, ...data };
+    else CFG = data;
+    toast(`✅ บันทึก ${file}.env แล้ว (${j.saved ?? Object.keys(data).length} keys)`);
   } catch (e) { toast('❌ ' + e.message, 'err'); }
 }
 /* ══ lab run ══ */
 let lastResult = null;
+let labPollTimer = null;
+function syncEngineUI() {
+  const engine = $('labEngine').value;
+  const fusion = engine === 'fusion';
+  $('rollFields').style.display = fusion ? 'none' : '';
+  document.querySelectorAll('.fusion-only').forEach(el => { el.style.display = fusion ? '' : 'none'; });
+  $('labUseCfgLabel').textContent = fusion ? 'ใช้ค่าจาก fusion.env' : 'ใช้ค่าจากแท็บตั้งค่า';
+}
 function labPayload() {
   const v = id => { const s = $(id).value.trim(); return s === '' ? undefined : s; };
-  const p = { mode: +$('labMode').value, rounds: +$('labRounds').value || 1000 };
-  const sb = v('labBalance'); if (sb !== undefined) p.startBalance = +sb;
-  const bb = v('labBaseBet'); if (bb !== undefined) p.baseBet = +bb;
-  const ch = v('labChance'); if (ch !== undefined) p.chance = +ch;
-  const st = $('labStrategy').value; if (st) p.strategy = st;
-  const ml = v('labMaxLoss'); if (ml !== undefined) p.maxLoss = +ml;
-  const sw = v('labStopWin'); if (sw !== undefined) p.stopWin = +sw;
-  const sl = v('labStopWagered'); if (sl !== undefined) p.stopWagered = +sl;
-  const ow = v('labOnWin'); if (ow !== undefined) p.onWin = +ow;
-  const wc = v('labWagerChance'); if (wc !== undefined) p.wagerChance = +wc;
+  const engine = $('labEngine').value;
+  const p = { engine, rounds: +$('labRounds').value || 1000, async: true };
+  const bal = v('labBalance');
+  if (bal !== undefined) p[engine === 'roll' ? 'startBalance' : 'balance'] = +bal;
   const seed = v('labSeed'); if (seed !== undefined) p.seed = +seed;
-  if ($('labRare').checked) p.rare = true;
-  if ($('labUseCfg').checked) p.config = collectCFG();
+  if (engine === 'roll') {
+    p.mode = +$('labMode').value;
+    const bb = v('labBaseBet'); if (bb !== undefined) p.baseBet = +bb;
+    const ch = v('labChance'); if (ch !== undefined) p.chance = +ch;
+    const st = $('labStrategy').value; if (st) p.strategy = st;
+    const ml = v('labMaxLoss'); if (ml !== undefined) p.maxLoss = +ml;
+    const sw = v('labStopWin'); if (sw !== undefined) p.stopWin = +sw;
+    const sl = v('labStopWagered'); if (sl !== undefined) p.stopWagered = +sl;
+    const ow = v('labOnWin'); if (ow !== undefined) p.onWin = +ow;
+    const wc = v('labWagerChance'); if (wc !== undefined) p.wagerChance = +wc;
+    if ($('labRare').checked) p.rare = true;
+    if ($('labUseCfg').checked) p.config = collectCFG();
+  } else {
+    p.mode = +$('labFusionMode').value;
+    const vault = v('labVault'); if (vault !== undefined) p.vault = +vault;
+    // Only send fusion overrides if the fusion form has actually been loaded.
+    if ($('labUseCfg').checked && Object.keys(fusionCfg).length) p.config = collectFusion();
+  }
   return p;
+}
+function setProgress(p) {
+  const bar = $('runProgress'), fill = $('runProgressBar'), txt = $('runProgressTxt');
+  if (!p) { bar.classList.remove('on'); txt.textContent = ''; return; }
+  bar.classList.add('on');
+  const done = +p.rounds || 0, total = +p.total || 0;
+  const pct = total ? Math.min(100, done / total * 100) : 0;
+  fill.style.width = pct.toFixed(1) + '%';
+  txt.textContent = total
+    ? `${done.toLocaleString()} / ${total.toLocaleString()} รอบ · ${pct.toFixed(1)}%`
+    : `${done.toLocaleString()} รอบ`;
+}
+function hideProgress() {
+  $('runProgress').classList.remove('on');
+  $('runProgressTxt').textContent = '';
+}
+function pollJob(id, t0) {
+  return new Promise((resolve, reject) => {
+    const tick = async () => {
+      try {
+        const r = await fetch('/run/status?id=' + encodeURIComponent(id), { cache: 'no-store' });
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.error || 'status failed');
+        if (j.state === 'done') {
+          if (!j.result) throw new Error('missing result');
+          lastResult = j.result;
+          renderResult(j.result, (performance.now() - t0) / 1000);
+          toast(`✓ รันเสร็จ ${(+j.result.summary.rounds || 0).toLocaleString()} รอบ`);
+          resolve();
+          return;
+        }
+        if (j.state === 'error') throw new Error(j.error || 'run failed');
+        if (j.preview) {
+          lastResult = { summary: j.preview.summary, equity: j.preview.equity || [], recent: [] };
+          renderKPIs(lastResult.summary);
+          drawChart();
+          drawDonut();
+        }
+        if (j.progress) setProgress(j.progress);
+        if (performance.now() - t0 > 180000) throw new Error('timeout 180s');
+        labPollTimer = setTimeout(tick, 800);
+      } catch (e) { reject(e); }
+    };
+    tick();
+  });
 }
 async function runLab() {
   const btn = $('btnRun');
+  if (labPollTimer) { clearTimeout(labPollTimer); labPollTimer = null; }
   btn.disabled = true;
   btn.innerHTML = '<span class="spin"></span> กำลังรัน…';
   const t0 = performance.now();
+  setProgress({ rounds: 0, total: +$('labRounds').value || 0 });
   try {
-    const r = await fetch('/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(labPayload()) });
+    const r = await fetch('/run', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(labPayload())
+    });
     const j = await r.json();
     if (!j.ok) throw new Error(j.error || 'run failed');
-    lastResult = j;
-    renderResult(j, (performance.now() - t0) / 1000);
-    toast(`✓ รันเสร็จ ${j.summary.rounds.toLocaleString()} รอบ`);
-  } catch (e) { toast('❌ ' + e.message, 'err'); }
-  finally { btn.disabled = false; btn.textContent = '▶ รันจำลอง'; }
+    if (j.jobId) {
+      await pollJob(j.jobId, t0);
+    } else {
+      lastResult = j;
+      renderResult(j, (performance.now() - t0) / 1000);
+      toast(`✓ รันเสร็จ ${(+j.summary.rounds || 0).toLocaleString()} รอบ`);
+    }
+  } catch (e) { toast('❌ ' + e.message, 'err', 5000); }
+  finally {
+    btn.disabled = false;
+    btn.textContent = '▶ รันจำลอง';
+    labPollTimer = null;
+    setTimeout(hideProgress, 1200);
+  }
 }
 const fmt = (n, d = 4) => n === null || n === undefined || isNaN(+n) ? '—' : (+n).toFixed(d);
-function renderResult(j, secs) {
-  const s = j.summary;
-  const pnl = $('kPnl'); pnl.textContent = (s.net_pnl >= 0 ? '+' : '') + fmt(s.net_pnl, 4);
-  pnl.className = 'v ' + (s.net_pnl > 0 ? 'green' : s.net_pnl < 0 ? 'red' : '');
+function renderKPIs(s) {
+  s = s || {};
+  const pnl = +s.net_pnl || 0;
+  const pnlEl = $('kPnl');
+  pnlEl.textContent = (pnl >= 0 ? '+' : '') + fmt(pnl, 4);
+  pnlEl.className = 'v ' + (pnl > 0 ? 'green' : pnl < 0 ? 'red' : '');
   $('kBal').textContent = fmt(s.balance, 4);
-  $('kWin').textContent = `${s.wins}W/${s.losses}L · ${fmt(s.win_rate, 1)}%`;
-  $('kStreak').textContent = s.max_loss_streak;
-  $('kRounds').textContent = s.rounds.toLocaleString();
+  $('kWin').textContent = `${(+s.wins || 0)}W/${(+s.losses || 0)}L · ${fmt(s.win_rate, 1)}%`;
+  $('kStreak').textContent = s.max_loss_streak ?? '—';
+  $('kRounds').textContent = (+s.rounds || 0).toLocaleString();
   $('kWager').textContent = fmt(s.wagered, 2);
+  const ddEl = $('kDd');
+  if (s.max_drawdown_pct === null || s.max_drawdown_pct === undefined) {
+    ddEl.textContent = '—';
+    ddEl.title = '';
+  } else {
+    ddEl.textContent = '-' + fmt(Math.abs(+s.max_drawdown_pct), 2) + '%';
+    ddEl.title = s.max_drawdown !== undefined ? `สูงสุด ${fmt(s.max_drawdown, 4)}` : '';
+  }
+}
+function renderResult(j, secs) {
+  const s = j.summary || {};
+  renderKPIs(s);
   const badge = $('stopBadge');
   if (s.stop_reason) { badge.style.display = ''; badge.textContent = '⏹ ' + s.stop_reason; }
   else badge.style.display = 'none';
-  $('chartInfo').textContent = `${s.engine_mode} · seed ${s.seed ?? 'สุ่ม'} · ${secs.toFixed(1)}s`;
+  $('chartInfo').textContent = `${s.engine_mode || s.engine || 'RUN'} · seed ${s.seed ?? 'สุ่ม'} · ${(+secs || 0).toFixed(1)}s`;
   drawChart();
+  drawDonut();
   // recent table
   const rows = j.recent || [];
   $('recentN').textContent = rows.length;
@@ -608,54 +923,106 @@ function renderResult(j, secs) {
   (s.rare_hits || []).slice(-5).reverse().forEach(h => { html += `<div class="ev warn">🎯 ${h.tag} · รอบ ${h.round} · roll ${h.roll} · +${fmt(h.won, 4)}</div>`; });
   $('eventFeed').innerHTML = html || '<div class="empty">ไม่มีเหตุการณ์พิเศษ</div>';
 }
+function axisFmt(v) {
+  const a = Math.abs(v);
+  if (a >= 1000) return v.toFixed(0);
+  if (a >= 100) return v.toFixed(1);
+  if (a >= 1) return v.toFixed(2);
+  if (a >= 0.01) return v.toFixed(4);
+  return v.toFixed(8);
+}
 function drawChart() {
   const cv = $('equity'); if (!cv || !cv.clientWidth) return;
   const dpr = window.devicePixelRatio || 1;
   const W = cv.clientWidth, H = cv.clientHeight || 220;
   cv.width = W * dpr; cv.height = H * dpr;
-  const c = cv.getContext('2d'); c.scale(dpr, dpr);
+  const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
   c.clearRect(0, 0, W, H);
   const j = lastResult;
-  if (!j || !j.equity.length) {
+  if (!j || !j.equity || !j.equity.length) {
     c.fillStyle = '#7d8aa5'; c.font = '13px system-ui'; c.textAlign = 'center';
     c.fillText('กราฟจะปรากฏหลังกด “▶ รันจำลอง”', W / 2, H / 2);
     return;
   }
   const key = $('chartSel').value;
-  const pts = j.equity.map(p => ({ x: p.round, y: p[key] }));
+  const field = key === 'drawdown' ? 'ddPct' : key;
+  const pts = j.equity
+    .map(p => ({ x: +p.round || 0, y: +(p[field] ?? 0) }))
+    .filter(p => Number.isFinite(p.y));
+  if (!pts.length) {
+    c.fillStyle = '#7d8aa5'; c.font = '13px system-ui'; c.textAlign = 'center';
+    c.fillText('ยังไม่มีข้อมูลเพียงพอสำหรับกราฟนี้', W / 2, H / 2);
+    return;
+  }
+  const base = (key === 'account' || key === 'balance')
+    ? +(j.summary.start_balance ?? pts[0].y) : 0;
   let mn = Math.min(...pts.map(p => p.y)), mx = Math.max(...pts.map(p => p.y));
-  if (key === 'balance') { mn = Math.min(mn, j.summary.start_balance); mx = Math.max(mx, j.summary.start_balance); }
+  if (['account', 'balance', 'netPnl', 'drawdown'].includes(key)) {
+    mn = Math.min(mn, base); mx = Math.max(mx, base);
+  }
   if (mn === mx) { mn -= 1; mx += 1; }
   const pad = (mx - mn) * 0.08; mn -= pad; mx += pad;
-  const L = 56, R = 10, T = 10, B = 22;
+  const L = 62, R = 10, T = 10, B = 22;
   const X = x => L + (x - pts[0].x) / Math.max(1, pts[pts.length - 1].x - pts[0].x) * (W - L - R);
   const Y = y => T + (1 - (y - mn) / (mx - mn)) * (H - T - B);
   c.strokeStyle = 'rgba(99,120,200,.15)'; c.fillStyle = '#7d8aa5'; c.font = '10px ui-monospace,monospace'; c.lineWidth = 1;
   for (let i = 0; i <= 4; i++) {
     const y = mn + (mx - mn) * i / 4;
     c.beginPath(); c.moveTo(L, Y(y)); c.lineTo(W - R, Y(y)); c.stroke();
-    c.textAlign = 'right'; c.fillText(y.toFixed(2), L - 6, Y(y) + 3);
+    c.textAlign = 'right'; c.fillText(axisFmt(y), L - 6, Y(y) + 3);
   }
   c.textAlign = 'center';
   c.fillText(pts[0].x, L, H - 6); c.fillText(pts[pts.length - 1].x, W - R, H - 6);
-  if (key === 'balance') {
+  if (['account', 'balance', 'netPnl', 'drawdown'].includes(key)) {
     c.setLineDash([5, 4]); c.strokeStyle = 'rgba(125,138,165,.6)';
-    c.beginPath(); c.moveTo(L, Y(j.summary.start_balance)); c.lineTo(W - R, Y(j.summary.start_balance)); c.stroke();
+    c.beginPath(); c.moveTo(L, Y(base)); c.lineTo(W - R, Y(base)); c.stroke();
     c.setLineDash([]);
   }
-  const last = pts[pts.length - 1].y, up = last >= pts[0].y;
+  const last = pts[pts.length - 1].y;
+  const up = key === 'drawdown' ? false : last >= base;
+  const lineColour = key === 'drawdown' ? '#f87171' : up ? '#34d399' : '#f87171';
   const grad = c.createLinearGradient(0, T, 0, H - B);
   grad.addColorStop(0, up ? 'rgba(52,211,153,.35)' : 'rgba(248,113,113,.35)');
   grad.addColorStop(1, 'rgba(0,0,0,0)');
   c.beginPath(); c.moveTo(X(pts[0].x), Y(pts[0].y));
   pts.forEach(p => c.lineTo(X(p.x), Y(p.y)));
-  c.lineTo(X(last ? pts[pts.length - 1].x : 0), H - B); c.lineTo(X(pts[0].x), H - B); c.closePath();
+  c.lineTo(X(pts[pts.length - 1].x), H - B); c.lineTo(X(pts[0].x), H - B); c.closePath();
   c.fillStyle = grad; c.fill();
   c.beginPath(); c.moveTo(X(pts[0].x), Y(pts[0].y));
   pts.forEach(p => c.lineTo(X(p.x), Y(p.y)));
-  c.strokeStyle = up ? '#34d399' : '#f87171'; c.lineWidth = 1.8; c.stroke();
-  c.fillStyle = up ? '#34d399' : '#f87171';
+  c.strokeStyle = lineColour; c.lineWidth = 1.8; c.stroke();
+  c.fillStyle = lineColour;
   c.beginPath(); c.arc(X(pts[pts.length - 1].x), Y(last), 3.5, 0, 7); c.fill();
+}
+function drawDonut() {
+  const cv = $('wlDonut'); if (!cv) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth || 108, H = cv.clientHeight || 108;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.clearRect(0, 0, W, H);
+  const s = (lastResult && lastResult.summary) || {};
+  const wins = +s.wins || 0, losses = +s.losses || 0, total = wins + losses;
+  const cx = W / 2, cy = H / 2, r = Math.min(W, H) * 0.38, lw = Math.max(8, r * 0.34);
+  c.lineCap = 'butt';
+  c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2);
+  c.strokeStyle = '#2a3350'; c.lineWidth = lw; c.stroke();
+  if (total) {
+    const start = -Math.PI / 2;
+    const winAngle = Math.PI * 2 * (wins / total);
+    c.beginPath(); c.arc(cx, cy, r, start, start + winAngle);
+    c.strokeStyle = '#34d399'; c.lineWidth = lw; c.stroke();
+    c.beginPath(); c.arc(cx, cy, r, start + winAngle, start + Math.PI * 2);
+    c.strokeStyle = '#f87171'; c.lineWidth = lw; c.stroke();
+  }
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillStyle = '#e2e8f0'; c.font = `700 ${Math.round(W * 0.145)}px ui-monospace,monospace`;
+  c.fillText(total ? (wins / total * 100).toFixed(1) + '%' : '—', cx, cy - W * 0.03);
+  c.fillStyle = '#7d8aa5'; c.font = `700 ${Math.round(W * 0.085)}px ui-monospace,monospace`;
+  c.fillText('WIN RATE', cx, cy + W * 0.115);
+  $('wlLegend').innerHTML = total
+    ? `<span class="win">● ${wins}W</span> · <span class="loss">● ${losses}L</span><br><b>${total.toLocaleString()}</b> รอบ`
+    : 'ยังไม่มีผล';
 }
 /* ══ calc ══ */
 let lastCalc = null;
@@ -729,16 +1096,70 @@ $('cMode').addEventListener('change', e => {
 $('labMode').addEventListener('change', e => { CFG.GAME_MODE = e.target.value; syncModeUI(); });
 $('labRounds').addEventListener('input', e => { if (+e.target.value >= 10 && +e.target.value <= 50000) $('labRoundsR').value = e.target.value; });
 $('chartSel').addEventListener('change', drawChart);
-window.addEventListener('resize', drawChart);
+window.addEventListener('resize', () => { drawChart(); drawDonut(); });
 $('btnSave').addEventListener('click', saveConfig);
 $('btnReload').addEventListener('click', () => { loadConfig(); updateStatus(); });
 $('btnRun').addEventListener('click', runLab);
 $('btnSeed').addEventListener('click', () => $('labSeed').value = Math.floor(Math.random() * 100000));
-$('btnCsv').addEventListener('click', () => window.open('/csv', '_blank'));
+$('btnCsv').addEventListener('click', () => window.open('/csv?file=latest', '_blank'));
 $('btnCalc').addEventListener('click', () => solveCalc(false));
 $('btnCalcSave').addEventListener('click', () => solveCalc(true));
-(async () => { await updateStatus(); await loadConfig(true); await renderPresets(); drawChart(); })();
+$('labEngine').addEventListener('change', syncEngineUI);
+document.querySelectorAll('.cfgbtn').forEach(b => b.addEventListener('click', () => setConfigFile(b.dataset.cfg)));
+$('fusionSearch').addEventListener('input', e => filterFusion(e.target.value.trim().toLowerCase()));
+
+/* ══ PWA install / service worker ══ */
+function setupPWA() {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/service-worker.js').catch(() => undefined);
+  }
+  const standalone = window.matchMedia('(display-mode: standalone)').matches;
+  if (!standalone) $('btnInstall').style.display = '';
+  window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault();
+    installPrompt = e;
+    $('btnInstall').style.display = '';
+  });
+  window.addEventListener('appinstalled', () => {
+    installPrompt = null;
+    $('btnInstall').style.display = 'none';
+    toast('✅ ติดตั้ง Dice Lab แล้ว', 'ok');
+  });
+  $('btnInstall').addEventListener('click', async () => {
+    if (installPrompt) {
+      installPrompt.prompt();
+      try { await installPrompt.userChoice; } catch { /* dismissed */ }
+      installPrompt = null;
+      $('btnInstall').style.display = 'none';
+      return;
+    }
+    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    toast(
+      ios
+        ? 'Safari: กดปุ่มแชร์ → “เพิ่มไปที่หน้าจอโฮม”'
+        : 'เปิดเมนูเบราว์เซอร์ → “ติดตั้งแอป” หรือ “เพิ่มไปที่หน้าจอโฮม”',
+      'info', 7000
+    );
+  });
+}
+function openTabFromUrl() {
+  const tab = new URLSearchParams(location.search).get('tab');
+  const btn = tab && document.querySelector(`.tab[data-tab="${tab}"]`);
+  if (btn) btn.click();
+}
+(async () => {
+  syncEngineUI();
+  setupPWA();
+  await setConfigFile('dice', true);
+  await renderPresets();
+  await updateStatus();
+  openTabFromUrl();
+  drawChart();
+  drawDonut();
+})();
 setInterval(updateStatus, 30000);
+window.addEventListener('online', updateStatus);
+window.addEventListener('offline', updateStatus);
 </script>
 </body>
 </html>
