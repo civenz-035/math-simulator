@@ -81,8 +81,18 @@ dmenu(){ "$_alias_sh_dir/../bin/menu.sh" "$@"; }
 alias dmn='dmenu' 
 
 gameble(){
-	local py_cmd="python"
-	command -v python >/dev/null 2>&1 || py_cmd="py"
+	
+	if command -v python >/dev/null 2>&1 ;then
+
+        local py_cmd="python"
+
+    elif command -v python3 >/dev/null 2>&1 ;then
+
+
+         local py_cmd="python3"
+
+    fi
+
 
 	case "$1" in
 		-chk|--check|status|--status)
